@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Basal Station</title>
+<link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+<header>
+  <div class="logo"><span class="mark">◐</span> BASAL&nbsp;STATION</div>
+  <div id="hwSummary" class="hw muted">detecting hardware…</div>
+  <div class="spacer"></div>
+  <div id="kbPill" class="pill off" title="knowledge-palace MCP connection">knowledge offline</div>
+  <div id="enginePill" class="pill off">engine stopped</div>
+</header>
+
+<main class="grid">
+  <aside class="col-left">
+    <section class="card">
+      <h2>Model</h2>
+      <select id="modelSelect"></select>
+      <div id="modelInfo" class="small muted"></div>
+
+      <h3>Backend</h3>
+      <div id="backendList" class="backend-list"></div>
+
+      <div id="quantRow" class="row hidden">
+        <label>Quant</label>
+        <select id="quantSelect">
+          <option>Q4_K_M</option><option>Q5_K_M</option>
+          <option>Q6_K</option><option>Q8_0</option>
+        </select>
+      </div>
+
+      <div class="row actions">
+        <button id="btnStart" class="primary">Start engine</button>
+        <button id="btnStop">Stop</button>
+      </div>
+      <div id="engineInfo" class="small muted"></div>
+
+      <h3>Weights on disk</h3>
+      <div id="downloadList" class="small"></div>
+    </section>
+  </aside>
+
+  <section class="col-main">
+    <section class="card">
+      <div class="row spread">
+        <h2>State</h2>
+        <button id="btnExample" class="ghost small">load example</button>
+      </div>
+      <textarea id="stateInput" rows="7"
+        placeholder="Paste the message, document, trace or transcript to judge…"></textarea>
+
+      <div class="row spread">
+        <h2>Questions</h2>
+        <button id="btnAddQ" class="ghost small">+ question</button>
+      </div>
+      <div id="questionList"></div>
+
+      <div class="row runrow">
+        <button id="btnRun" class="primary big">Run decision</button>
+        <label class="check"><input type="checkbox" id="chkGround" checked>
+          ground with knowledge-palace</label>
+        <label class="check" title="Answer each question with 2 option orderings to fight order sensitivity (2× cost)">
+          <input type="checkbox" id="chkOrders"> orders&nbsp;×2</label>
+        <label class="check">top-k <input id="topk" type="number" value="5" min="1" max="20"></label>
+        <input id="kbQuery" class="grow" placeholder="retrieval query override (optional)">
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Result</h2>
+      <div id="results"><div class="muted">No decision yet.</div></div>
+      <div id="usageLine" class="small muted"></div>
+    </section>
+  </section>
+
+  <aside class="col-right">
+    <section class="card">
+      <h2>Knowledge palace</h2>
+      <div id="kbStatus" class="small muted"></div>
+      <h3>Search</h3>
+      <div class="row">
+        <input id="kbSearchInput" class="grow" placeholder="query…">
+        <button id="btnSearch">Go</button>
+      </div>
+      <h3>Ask</h3>
+      <div class="row">
+        <input id="kbAskInput" class="grow" placeholder="question…">
+        <button id="btnAsk">Go</button>
+      </div>
+      <div id="kbResults"></div>
+    </section>
+  </aside>
+</main>
+
+<section class="card logs">
+  <details id="logDetails">
+    <summary>Engine logs</summary>
+    <pre id="logBox"></pre>
+  </details>
+</section>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/ui/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+# basal-station configuration
+# Copy to ./basal-station.yaml or ~/.config/basal-station/config.yaml
+#
+# Env overrides: BASAL_STATION_SERVER_PORT, BASAL_STATION_ENGINE_PORT,
+# BASAL_STATION_ENGINE_COMMAND, KP_COMMAND (full command line, shell-quoted).
+
+server:
+  host: 127.0.0.1
+  port: 8800          # basal-station web UI + API
+
+engine:
+  # Console script of the basal inference engine.
+  # Install per-platform (see README): basal[mlx] on Apple Silicon,
+  # basal[fp8] on big NVIDIA GPUs, plain basal for GGUF/llama.cpp routes.
+  command: basal-serve
+  host: 127.0.0.1
+  port: 8000          # engine HTTP port (basal-serve /v1/systemone)
+  startup_timeout: 300
+  extra_args: []
+  # Heuristic GPU layer offload for --mode gguf on CUDA:
+  #   "auto" -> compute from free VRAM, integer -> fixed -ngl, 0 -> never offload
+  gguf_ngl: auto
+
+knowledge:
+  enabled: true
+  # knowledge-palace MCP server (stdio). Example from a ZCode install:
+  #   ["/Users/you/Documents/knowledge-palace/.venv/bin/kp", "mcp"]
+  command: ["kp", "mcp"]
+  env: {}
+  default_top_k: 5
+  timeout_s: 30
+
+# Default model key from the built-in catalog (see `basal-station models`).
+default_model: omni-1.0-max
+
+# Pick the best backend automatically for this machine at startup.
+auto_backend: true
