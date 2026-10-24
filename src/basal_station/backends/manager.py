@@ -60,6 +60,28 @@ class EngineManager:
         async with self._lock:
             await self._stop_locked()
             hw = detect()
+
+            # An engine may already be serving on the configured port (another
+            # station/MCP/CLI client started it). Adopt it instead of spawning
+            # a duplicate that would fight over the port.
+            if await self._external_healthy():
+                self._state.update(
+                    running=True,
+                    backend=backend_key,
+                    model=model_key,
+                    mode=profile.mode,
+                    pid=None,
+                    started_at=datetime.now(UTC).isoformat(),
+                    command=["(adopted engine already listening on port)"],
+                    info={"adopted": True, "mode": profile.mode, "model": model.key},
+                    last_error=None,
+                )
+                self._log(
+                    f"adopted engine already serving on {self.settings.engine.base_url} "
+                    f"({backend_key}/{model_key})"
+                )
+                return self.status()
+
             ranked_list = rank_backends(
                 hw,
                 model,
@@ -117,6 +139,14 @@ class EngineManager:
             self._log("engine healthy")
             return self.status()
 
+    async def _external_healthy(self) -> bool:
+        """True when *something* answers /health on the engine port."""
+        try:
+            resp = await self._client.get(f"{self.settings.engine.base_url}/health")
+            return resp.status_code == 200
+        except httpx.HTTPError:
+            return False
+
     async def stop(self) -> dict:
         async with self._lock:
             await self._stop_locked()
@@ -126,6 +156,8 @@ class EngineManager:
         proc = self._proc
         self._proc = None
         if proc is None or proc.returncode is not None:
+            if self._state.get("info", {}).get("adopted"):
+                self._log("detached from adopted engine (it keeps serving on its port)")
             self._state.update(running=False, pid=None)
             return
         self._log("stopping engine…")
@@ -160,6 +192,13 @@ class EngineManager:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self._proc is None or self._proc.returncode is not None:
+                # Our child died — most likely the port was claimed by a
+                # concurrent starter (station + MCP + CLI racing). Succeed if
+                # another engine ends up serving, otherwise fail fast.
+                if await self._external_healthy():
+                    self._state["pid"] = None
+                    self._state["info"] = {**self._state.get("info", {}), "adopted": True}
+                    return True
                 return False
             try:
                 resp = await self._client.get(url)

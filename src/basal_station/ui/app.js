@@ -345,11 +345,24 @@ function addQuestion(spec = {}) {
   critBox.className = "criteria";
   const crits = spec.criteria && typeof spec.criteria === "object" ? spec.criteria : {};
   const entries = Object.entries(crits);
+  const needsOptions = ["choice", "multi", "tool", "score"].includes(type.value);
   if (entries.length) {
     for (const [k, v] of entries) addCriterionRow(critBox, k, v);
-  } else if ((type.value === "choice" || type.value === "multi" || type.value === "tool")) {
-    addCriterionRow(critBox);
+  } else if (needsOptions) {
+    if (type.value === "score") {
+      // the engine requires a scale of 2+ anchors for score questions
+      addCriterionRow(critBox, "0.0", "scale low end");
+      addCriterionRow(critBox, "1.0", "scale high end");
+    } else {
+      addCriterionRow(critBox);
+    }
   }
+  type.addEventListener("change", () => {
+    if (type.value === "score" && !$$(".criterion .c-key", critBox).some((i) => i.value.trim())) {
+      addCriterionRow(critBox, "0.0", "scale low end");
+      addCriterionRow(critBox, "1.0", "scale high end");
+    }
+  });
   const addCrit = document.createElement("button");
   addCrit.className = "ghost small";
   addCrit.textContent = "+ criterion";

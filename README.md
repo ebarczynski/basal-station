@@ -145,6 +145,110 @@ basal-station decide payload.json      # one-shot against a running engine
 | GET/POST | `/api/knowledge/{status,search,ask,context,similar}` | knowledge-palace |
 | GET | `/api/plan?model=&quant=` | pure VRAM/-ngl plan |
 
+## Plugging it into your system (macOS)
+
+### 1. Durable install
+
+Clone out of any scratch workspace into a stable location — weights live in the
+shared HF cache, so nothing big is re-downloaded:
+
+```bash
+git clone git@github.com:ebarczynski/basal-station.git ~/basal-station
+cd ~/basal-station && ./scripts/setup-macos.sh
+cp /path/to/your/basal-station.yaml .   # or create from config/*.example.yaml
+```
+
+### 2. Auto-start on login (launchd)
+
+```bash
+cat > ~/Library/LaunchAgents/pl.ebarczynski.basal-station.plist <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>pl.ebarczynski.basal-station</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOU/basal-station/.venv/bin/basal-station</string>
+    <string>serve</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/YOU/basal-station</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/YOU/Library/Logs/basal-station.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/Library/Logs/basal-station.log</string>
+</dict></plist>
+XML
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/pl.ebarczynski.basal-station.plist
+```
+
+This starts the **console + API** (lightweight, ~100 MB). The 13 GB engine is
+booted on demand — from the UI's *Start engine* button, or automatically by the
+first decision that needs it. To pin the engine permanently instead, duplicate
+the plist with `basal-serve --model Remek/basal-omni-1.0-max-MLX --mode mlx`.
+
+Undo: `launchctl bootout gui/$(id -u)/pl.ebarczynski.basal-station` + delete the plist.
+
+### 3. Use it from ZCode / any MCP client (stdio)
+
+The package ships an MCP server (`python -m basal_station.mcp_server`) with five
+tools: `decide` (grounded typed decisions, auto-starts the engine on first use),
+`knowledge_search`, `knowledge_ask`, `engine_status`, `engine_start`. Register it
+in the MCP client's config:
+
+```json
+"basal-station": {
+  "type": "stdio",
+  "command": "/Users/YOU/basal-station/.venv/bin/python",
+  "args": ["-m", "basal_station.mcp_server"]
+}
+```
+
+Restart the client; from then on any chat can ask for a typed decision with a
+one-liner like *"decide with basal: route this email…"* — the model + your
+knowledge-palace answer with calibrated probabilities instead of generated prose.
+
+### 4. Terminal
+
+```bash
+alias basal=/Users/YOU/basal-station/.venv/bin/basal-station
+basal status          # hardware, knowledge-palace, engine
+basal ask "…"         # knowledge base
+basal search "…"      # knowledge base search
+```
+
+## Putting it to work — recipes
+
+The engine answers **all questions in one forward pass** (~0.3 s + prompt ingest
+on M5 Pro), so batch work is cheap. Each question is options + instructions you
+define — that's the whole programming model.
+
+**Triage inbox / tickets / alerts** (routing):
+```bash
+curl -s localhost:8800/api/decide -H 'content-type: application/json' -d '{
+  "state": "<email text>",
+  "questions": {"route": {"type": "choice", "instructions": "Who handles this?",
+    "criteria": {"billing": "…", "security": "…", "sales": "…", "spam": "…"}}},
+  "knowledge": {"enabled": true}}' | jq '.answers.route.probabilities'
+```
+
+**Yes/no verification with an audit trail** — `noul` returns calibrated
+true/false, and `max_error` makes the model *defer* ("not sure — escalate")
+below the certified threshold instead of guessing.
+
+**Risk scoring** — `score` questions with a 0–1 scale (needs 2+ anchors).
+
+**Grounded document checks** — state = a document, question =
+"does this contract clause match our policy?" and knowledge-palace supplies the
+policy text automatically; `grounded_state` in the response shows exactly what
+the model read.
+
+**Batch classification** — iterate files/rows, POST each as `state`; on Linux
+servers basal reports ~19 decisions/s at 32 concurrent clients.
+
+**From code** — the API is plain JSON: `requests.post("http://127.0.0.1:8800/api/decide", json={...})`.
+Anything that can POST HTTP can use it (Raycast, Shortcuts, cron jobs, n8n…).
+
 ## Notes & limits
 
 - The basal engine (`basal-serve`) is a separate install — `basal-station` finds it on `PATH` or as a sibling in the same venv (`engine.command` in the YAML).
