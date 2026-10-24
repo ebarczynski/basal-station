@@ -7,7 +7,6 @@ engine's own /v1/models, with the request preserved under info.requested.
 """
 
 import asyncio
-from types import SimpleNamespace
 
 from basal_station.backends.manager import EngineManager, ensure_running
 from basal_station.config import AppSettings, EngineConfig, KnowledgeConfig

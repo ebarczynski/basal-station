@@ -52,8 +52,8 @@ class _FakeConn:
 
 def _service_with_conn(tools: list[str]) -> KnowledgeService:
     svc = KnowledgeService.__new__(KnowledgeService)  # test seam: skip MCP startup
-    svc.config = KnowledgeConfig(enabled=True)  # noqa: SLF001
-    svc._conn = _FakeConn(tools)  # noqa: SLF001
+    svc.config = KnowledgeConfig(enabled=True)
+    svc._conn = _FakeConn(tools)
     return svc
 
 

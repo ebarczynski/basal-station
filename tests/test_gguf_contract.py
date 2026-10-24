@@ -11,12 +11,12 @@ import subprocess
 import pytest
 
 from basal_station.api import localrepo
+from basal_station.backends.base import get_backend
 from basal_station.backends.registry import (
     _gguf_file_for,
     build_engine_args,
     rank_backends,
 )
-from basal_station.backends.base import get_backend
 from basal_station.catalog import get_model
 from basal_station.hardware import GIB, GpuInfo, HardwareProfile
 
