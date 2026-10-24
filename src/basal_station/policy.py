@@ -7,7 +7,9 @@ Principles:
     - every automated action can name why it happened (audit trail)
 
 Precedence: deferral > failed noul/score checks > low confidence > route
-mapping > fallback. Checks always override routes — fail closed.
+mapping > pass action > fallback. Checks always override routes — fail closed.
+`pass_action` names the automation for the all-checks-passed case (gates);
+`fallback` stays the safe path for unmatched outcomes.
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ def apply_policy(answers: dict[str, dict[str, Any]], policy: dict[str, Any]) -> 
         noul_checks      {q: {"expect": true/false, "min": p}}
         score_checks     {q: {"max"|"min": value}}
         check_action     action when a noul/score check fails (default: fallback)
+        pass_action      action when every check passed and no route matched
         fallback         action when nothing else matched (required)
     """
     fallback = policy.get("fallback", "human_review")
@@ -107,6 +110,9 @@ def apply_policy(answers: dict[str, dict[str, Any]], policy: dict[str, Any]) -> 
     elif route_action is not None:
         action = route_action
         reasons.append(f"route match -> {action}")
+    elif "pass_action" in policy:
+        action = policy["pass_action"]
+        reasons.append(f"all checks passed -> {action}")
     else:
         action = fallback
         reasons.append(f"no rule matched -> fallback {fallback}")

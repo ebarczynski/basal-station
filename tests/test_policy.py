@@ -76,6 +76,30 @@ def test_policy_fallback_when_no_route_matches():
     assert out["action"] == "human_review"
 
 
+def test_policy_pass_action_when_all_checks_pass():
+    answers = {"ok": {"type": "noul", "probabilities": {"true": 0.95}, "confidence": 0.95}}
+    out = apply_policy(answers, {
+        "noul_checks": {"ok": {"expect": True, "min": 0.8}},
+        "pass_action": "auto_approve",
+        "fallback": "review",
+    })
+    assert out["action"] == "auto_approve"
+    assert not out["flagged"]
+    assert any("all checks passed" in r for r in out["reasons"])
+
+
+def test_policy_pass_action_not_used_when_check_fails():
+    answers = {"ok": {"type": "noul", "probabilities": {"true": 0.5}, "confidence": 0.5}}
+    out = apply_policy(answers, {
+        "noul_checks": {"ok": {"expect": True, "min": 0.8}},
+        "check_action": "review",
+        "pass_action": "auto_approve",
+        "fallback": "review",
+    })
+    assert out["action"] == "review"
+    assert out["flagged"]
+
+
 def test_policy_default_fallback_without_spec():
     out = apply_policy({"q": {"type": "choice", "choice": "x", "confidence": 0.9}}, {})
     assert out["action"] == "human_review"

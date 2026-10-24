@@ -56,6 +56,7 @@ POLICY = {
     "check_action": "revise",
     "defer_action": "abstain",
     "min_confidence": 0.55,
+    "pass_action": "accept",
     "fallback": "abstain",
 }
 
