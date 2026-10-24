@@ -81,6 +81,17 @@ def _make_tqdm(key: str):
     return TrackingTqdm
 
 
+def _quant_matches(name: str, quant: str) -> bool:
+    """True when the quant appears as a token in the filename.
+
+    'Q4' must not match Q4_K_M *and* Q4_K_S indiscriminately when a tighter
+    token match exists, so token-boundary matching is preferred by callers.
+    """
+    import re
+
+    return re.search(rf"(?i)(^|[^a-z0-9]){re.escape(quant)}([^a-z0-9]|$)", name) is not None
+
+
 def _pick_gguf_files(repo: str, quant: str | None) -> list[str]:
     from huggingface_hub import list_repo_files
 
@@ -88,8 +99,9 @@ def _pick_gguf_files(repo: str, quant: str | None) -> list[str]:
     if not files:
         raise DownloadError(f"no .gguf files in {repo}")
     if quant:
-        matches = [f for f in files if quant.lower() in f.lower()]
-        files = matches or files
+        exact = [f for f in files if _quant_matches(f, quant)]
+        loose = [f for f in files if quant.lower() in f.lower()]
+        files = exact or loose or files
     return files
 
 

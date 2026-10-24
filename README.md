@@ -4,7 +4,7 @@
 
 Basal models don't generate text: they read a *state* (message, document, trace, image, audio clip) and return **calibrated probabilities over answer options you define** — routing, yes/no, scores, tool selection — in a single forward pass. Basal Station is the missing local cockpit around them:
 
-- **Backend auto-selection** — detects Apple Silicon vs. CUDA vs. CPU and picks the best `basal-serve` mode: `mlx` on the Mac, `gguf` with **computed partial GPU offload (`-ngl`)** on small CUDA cards, `fp8`/vLLM on big GPUs, `eager` for full omni media support.
+- **Backend auto-selection** — detects Apple Silicon vs. CUDA vs. CPU and picks the best `basal-serve` mode: `mlx` on the Mac, `gguf` with a **resolved local GGUF file (`--gguf <file>`)** on small CUDA cards (the console shows VRAM/offload *estimates* — the engine decides the real offload), `fp8`/vLLM on big GPUs, `eager` for full omni media support.
 - **Embedded model catalog** — the whole `Remek/basal-*` family (omni 1.0/1.1, 2.0, 1.5, 1.0; 1B–12B) with GGUF / MLX / FP8 / safetensors repos, cache detection and one-click downloads.
 - **knowledge-palace integration** — a persistent MCP client retrieves passages from your personal knowledge base and grounds every decision state.
 - **Web console + HTTP API** — build states and typed questions visually, inspect probability bars, switch engines at runtime, tail engine logs.
@@ -22,7 +22,7 @@ Basal models don't generate text: they read a *state* (message, document, trace,
 ├────────────────────────────────────────────────────────────────────┤
 │  hardware: M5 Pro (unified mem)      │  RTX … 3 GB VRAM            │
 │  default: MLX 8-bit (13 GB)          │  default: GGUF Q4_K_M       │
-│                                      │  -ngl ≈ f(VRAM) partial     │
+│                                      │  --gguf <file>, offload est.│
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -52,14 +52,14 @@ cp config/basal-station.example.yaml basal-station.yaml   # set knowledge.comman
 basal-station serve
 ```
 
-Default path on small CUDA cards: **GGUF + computed `-ngl` partial offload**. The console shows the estimated offload percentage per backend before you start. On a 3 GB card:
+Default path on small CUDA cards: **GGUF + the downloaded single-file quant**, handed to the engine as `--gguf <file>`. The console shows the *estimated* offload percentage per backend before you start (the engine owns the actual offload decision). On a 3 GB card:
 
-| Model | GGUF Q4_K_M | expected offload |
+| Model | GGUF Q4_K_M | estimated offload |
 |---|---|---|
-| `basal-2.0-4.5B` | ~2.8 GB | ~80% of layers |
-| `basal-omni-1.0-max` (12B) | ~7.4 GB | ~30% of layers, rest in RAM |
+| `basal-2.0-4.5B` | ~2.8 GB | most layers, rest in RAM |
+| `basal-omni-1.0-max` (12B) | ~7.4 GB | a minority of layers, rest in RAM |
 
-> **llama.cpp:** the `gguf` modes shell out to llama.cpp — install a CUDA build (`scripts/setup-linux.sh` prints exact commands) or keep it CPU-only.
+> **llama.cpp:** the engine's `gguf` mode runs llama.cpp **in process** on the GGUF file — no separate llama-server install is needed for it. (A standalone llama-server is only required for the engine's separate `llamacpp` mode.)
 
 ## The decision API
 
@@ -87,7 +87,7 @@ curl -s localhost:8800/api/decide -H 'content-type: application/json' -d '{
 
 Response: per-question `choice`, `probabilities`, `confidence`, optional `deferred` (certified via `max_error`), engine `usage`, plus the `knowledge` block (query, hits, latency) and the exact `grounded_state` that was sent to the model.
 
-`POST /api/decide/raw` is a passthrough to the engine's `/v1/systemone` with any extra fields basal supports. `orders: 2` in the request mitigates option-order sensitivity at double cost.
+`POST /api/decide/raw` is a passthrough to the engine's `/v1/systemone` with any extra fields basal supports. To mitigate option-order sensitivity, start the engine with its `--orders 2` startup flag (averages both option orders, double cost): set `engine.extra_args: ["--orders", "2"]` in `basal-station.yaml` or pass `extra_args` to `/api/engine/start`.
 
 ### knowledge-palace wiring
 
@@ -106,7 +106,7 @@ Tools used: `context` (decision grounding), `search`, `ask`, `similar` (all expo
 | Backend key | basal-serve mode | Weights | Needs | Notes |
 |---|---|---|---|---|
 | `mlx` | `mlx` | MLX 8-bit | Apple Silicon | Default on the Mac |
-| `gguf-cuda` | `gguf` | GGUF | Linux + NVIDIA | `-ngl` computed from VRAM (0.90 × VRAM − ctx overhead, per-layer bytes) |
+| `gguf-cuda` | `gguf` | GGUF | Linux + NVIDIA | `--gguf <file>`; offload estimated in the console, engine decides |
 | `gguf-metal` | `gguf` | GGUF | macOS | Alternative to MLX |
 | `fp8-vllm` | `vllm` | FP8 | NVIDIA ≥ ~1.25× FP8 size | Hopper/Blackwell |
 | `eager` | `eager` | safetensors | RAM/VRAM ≥ bf16 size | **Only backend with omni media** (`--media on`) |
@@ -143,7 +143,7 @@ basal-station decide payload.json      # one-shot against a running engine
 | POST | `/api/engine/start` · `/stop` · GET `/status` · `/logs` | runtime engine switching |
 | POST | `/api/decide` · `/api/decide/raw` | grounded / raw typed decision |
 | GET/POST | `/api/knowledge/{status,search,ask,context,similar}` | knowledge-palace |
-| GET | `/api/plan?model=&quant=` | pure VRAM/-ngl plan |
+| GET | `/api/plan?model=&quant=` | VRAM/offload estimate (display only) |
 
 ## Plugging it into your system (macOS)
 
@@ -183,9 +183,15 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/pl.ebarczynski.basal-sta
 ```
 
 This starts the **console + API** (lightweight, ~100 MB). The 13 GB engine is
-booted on demand — from the UI's *Start engine* button, or automatically by the
-first decision that needs it. To pin the engine permanently instead, duplicate
-the plist with `basal-serve --model Remek/basal-omni-1.0-max-MLX --mode mlx`.
+booted on demand — from the UI's *Start engine* button, or automatically by
+the first decision that needs it (`auto_backend: true` by default; set it to
+`false` to require explicit starts). To pin the engine permanently instead,
+duplicate the plist with the engine command — and **always pass
+`--host 127.0.0.1`** (the engine's own default is `0.0.0.0`):
+
+```
+basal-serve --model Remek/basal-omni-1.0-max-MLX --mode mlx --host 127.0.0.1
+```
 
 Undo: `launchctl bootout gui/$(id -u)/pl.ebarczynski.basal-station` + delete the plist.
 
@@ -313,7 +319,7 @@ See [`agents/README.md`](agents/README.md). The kit includes:
 
 - The basal engine (`basal-serve`) is a separate install — `basal-station` finds it on `PATH` or as a sibling in the same venv (`engine.command` in the YAML).
 - GGUF/MLX/vLLM routes are **text-only**; images/audio require the `eager` backend and an omni model.
-- No authentication is exposed by design: everything binds to `127.0.0.1`. Don't proxy it publicly without adding auth in front.
+- No authentication is exposed by design: the station and every engine it starts bind to `127.0.0.1`. **Caveat:** the `basal-serve` binary itself defaults to `--host 0.0.0.0` — if you start it manually (launchd, systemd), always pass `--host 127.0.0.1`. Don't proxy any of it publicly without adding auth in front.
 - Model sizes for VRAM planning are estimates from parameter counts (Q4_K_M ≈ 0.62 B/param, FP8 ≈ 1.15, bf16 ≈ 2.05); the console labels them as `~GB`.
 - Apache-2.0, same as the basal engine and the model weights.
 
@@ -329,7 +335,7 @@ src/basal_station/
   eval.py              labeled-set evaluation + calibration
   backends/
     base.py            backend profiles (basal-serve modes)
-    registry.py        ranking, -ngl planning, arg building
+    registry.py        ranking, offload estimates, arg building
     manager.py         subprocess lifecycle, health, /v1/systemone proxy
   knowledge/
     client.py          persistent MCP stdio client (knowledge-palace)

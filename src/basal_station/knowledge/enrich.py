@@ -57,8 +57,9 @@ def format_hits_block(query: str, payload: Any) -> tuple[str, list[dict[str, Any
     hits = _normalize_hits(payload)
     if not hits:
         return "", []
-    lines = [f"Reference knowledge (from personal knowledge base; retrieval query: {query!r})"]
-    used = 0
+    header = f"Reference knowledge (from personal knowledge base; retrieval query: {query!r})"
+    lines = [header]
+    used = len(header)  # the header counts toward the budget (long queries!)
     kept = 0
     for i, hit in enumerate(hits, 1):
         source = hit.get("source") or hit.get("title") or hit.get("author") or hit.get("id") or ""
@@ -66,11 +67,12 @@ def format_hits_block(query: str, payload: Any) -> tuple[str, list[dict[str, Any
         if not text:
             continue
         prefix = f"[{i}] {f'({source}) ' if source else ''}"
-        chunk = text[: MAX_BLOCK_CHARS - used - len(prefix) - 50]
-        if not chunk:
+        budget = MAX_BLOCK_CHARS - used - len(prefix) - 1
+        if budget <= 0:
             break
+        chunk = text[:budget]
         lines.append(f"{prefix}{chunk}")
-        used += len(prefix) + len(chunk) + 1
+        used += len(prefix) + len(chunk) + 1  # +1 = the joining newline
         kept += 1
         if used >= MAX_BLOCK_CHARS:
             break

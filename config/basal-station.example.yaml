@@ -17,8 +17,10 @@ engine:
   port: 8000          # engine HTTP port (basal-serve /v1/systemone)
   startup_timeout: 300
   extra_args: []
-  # Heuristic GPU layer offload for --mode gguf on CUDA:
-  #   "auto" -> compute from free VRAM, integer -> fixed -ngl, 0 -> never offload
+  # Offload ESTIMATE for --mode gguf on CUDA (see ADR-0002):
+  # display-only: shapes the offload ESTIMATE shown in the console.
+  # The engine decides the real offload (ADR-0002); this never reaches it.
+  #   "auto" -> estimate from free VRAM, integer -> fixed estimate, 0 -> none
   gguf_ngl: auto
 
 knowledge:

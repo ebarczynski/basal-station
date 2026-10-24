@@ -22,22 +22,20 @@ uv pip install --python "$VIRTUAL_ENV/bin/python" "basal[mcp] @ https://github.c
 echo "==> Installing basal-station"
 uv pip install --python "$VIRTUAL_ENV/bin/python" -e .
 
-echo "==> Checking for llama.cpp (used by basal --mode gguf)"
+echo "==> Checking for llama.cpp (only needed for the engine's 'llamacpp' server mode)"
 if command -v llama-server >/dev/null 2>&1 || command -v llama-cli >/dev/null 2>&1; then
     echo "    llama.cpp found."
 else
     cat <<'EOF'
-    llama-server not found on PATH. For GPU offload install a CUDA build, e.g.:
+    llama-server not found on PATH. That is fine for the default `gguf` mode:
+    the engine runs llama.cpp in process on the GGUF file. A standalone
+    llama-server build is only needed if you use the engine's separate
+    `llamacpp` mode (--llamacpp-url). To build one with CUDA:
 
-      # Ubuntu/Debian — prebuilt CUDA binaries from the llama.cpp releases page,
-      # or build from source:
       sudo apt install -y build-essential cmake libcurl4-openssl-dev
       git clone https://github.com/ggml-org/llama.cpp && cd llama.cpp
       cmake -B build -DGGML_CUDA=ON && cmake --build build --config Release -j
       sudo cp build/bin/llama-* /usr/local/bin/
-
-    basal-serve --mode gguf shells out to it; without it, the gguf-cuda backend
-    cannot start (gguf-cpu also needs it). CPU-only machines can skip the CUDA flag.
 EOF
 fi
 

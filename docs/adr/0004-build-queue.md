@@ -1,11 +1,11 @@
-# Post-grill build queue — AWAITING GO
+# Post-grill build queue — items 1–7 DONE, item 8 GATED
 
-Status: **awaiting GO** (the 2026-10-24 gate round timed out unanswered; per
-grill rules a timed-out gate is never executed on). Any later "go" triggers
-execution from this list.
+Status: **1–7 implemented and pushed to `grill`** (2026-10-24, tests green
+at each commit). Item 8 touches the separate knowledge-palace repo and
+stays gated on its own branch + confirmation.
 
 Settled decisions live in ADR-0001 (grounding), ADR-0002 (GGUF contract),
-ADR-0003 (adoption). Work happens on the `grill` branch only; `main` is
+ADR-0003 (adoption). Work happened on the `grill` branch only; `main` is
 frozen until the owner merges.
 
 Priority order:

@@ -31,7 +31,7 @@ class EngineConfig(BaseModel):
     port: int = 8000
     startup_timeout: float = 300.0
     extra_args: list[str] = Field(default_factory=list)
-    gguf_ngl: str | int = "auto"  # "auto" | int
+    gguf_ngl: str | int = "auto"  # display-only offload estimate (ADR-0002)
 
     @property
     def base_url(self) -> str:

@@ -24,6 +24,17 @@ def _parse_float(value: Any) -> float | None:
         return None
 
 
+def _p_true(probs: Any) -> float | None:
+    """P(true) from an answer's probabilities dict (case-tolerant)."""
+    if not isinstance(probs, dict):
+        return None
+    for key in ("true", "True", "TRUE"):
+        value = probs.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return None
+
+
 def evaluate_question(
     qname: str,
     qtype: str,
@@ -53,10 +64,7 @@ def evaluate_question(
     elif qtype == "noul":
         tp = tn = fp = fn = 0
         for answer, label in pairs:
-            probs = answer.get("probabilities", {})
-            p_true = probs.get("true")
-            if p_true is None:
-                p_true = probs.get(str(bool(label)))
+            p_true = _p_true(answer.get("probabilities"))
             predicted_true = (p_true if p_true is not None else 0.0) >= threshold
             label_true = bool(label)
             if predicted_true and label_true:
@@ -97,8 +105,7 @@ def evaluate_question(
         if qtype == "choice":
             hit = 1.0 if answer.get("choice") == label else 0.0
         elif qtype == "noul":
-            probs = answer.get("probabilities", {})
-            p_true = probs.get("true")
+            p_true = _p_true(answer.get("probabilities"))
             hit = 1.0 if ((p_true if p_true is not None else 0.0) >= threshold) == bool(label) else 0.0
         else:
             continue
