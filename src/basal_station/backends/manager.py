@@ -221,7 +221,9 @@ class EngineManager:
             return False
 
     async def decide(self, payload: dict) -> dict:
-        if not await self.healthy():
+        # /health is the source of truth (covers own child and engines
+        # started by the service, MCP or any other client on this port).
+        if not await self._external_healthy():
             raise EngineError("engine is not running")
         resp = await self._client.post(
             f"{self.settings.engine.base_url}/v1/systemone", json=payload

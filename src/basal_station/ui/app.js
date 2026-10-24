@@ -413,6 +413,7 @@ function renderResult(answers, usage) {
     head.innerHTML = `<span class="r-name">${escapeHtml(name)}</span>` +
       `<span class="r-type">${escapeHtml(a.type || "")}</span>` +
       (a.choice != null ? `<span class="r-choice">→ ${escapeHtml(a.choice)}</span>` : "") +
+      (a.score != null ? `<span class="r-choice">→ ${escapeHtml(Number(a.score).toFixed(2))}</span>` : "") +
       (a.deferred ? `<span class="tag-deferred">deferred</span>` : "");
     q.appendChild(head);
 

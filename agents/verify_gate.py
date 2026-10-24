@@ -99,7 +99,8 @@ def main() -> int:
     critique = []
     for name, a in answers.items():
         if a.get("type") == "score":
-            critique.append(f"{name}={a.get('choice')}")
+            value = a.get("score", a.get("choice"))
+            critique.append(f"{name}={value}")
     critique.extend(policy.get("reasons", []))
 
     print(json.dumps({

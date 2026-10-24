@@ -77,7 +77,7 @@ def evaluate_question(
     elif qtype == "score":
         errors = []
         for answer, label in pairs:
-            value = _parse_float(answer.get("choice"))
+            value = _parse_float(answer.get("score", answer.get("choice")))
             target = _parse_float(label)
             if value is not None and target is not None:
                 errors.append(abs(value - target))

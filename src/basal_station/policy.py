@@ -16,14 +16,20 @@ from typing import Any
 
 
 def _score_value(answer: dict[str, Any]) -> float | None:
-    """Numeric value of a score answer (the chosen anchor, if parseable)."""
-    choice = answer.get("choice")
-    if choice is None:
-        return None
-    try:
-        return float(choice)
-    except (TypeError, ValueError):
-        return None
+    """Numeric value of a score answer.
+
+    The engine emits a continuous `score` field (not necessarily anchored to
+    the criteria keys); older shapes fall back to the chosen anchor key.
+    """
+    for key in ("score", "value", "choice"):
+        value = answer.get(key)
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def apply_policy(answers: dict[str, dict[str, Any]], policy: dict[str, Any]) -> dict[str, Any]:
