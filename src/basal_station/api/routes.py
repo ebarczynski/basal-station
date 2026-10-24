@@ -138,7 +138,6 @@ async def engine_logs(request: Request, n: int = 120):
 
 # ---------------------------------------------------------------- decide
 
-@router.post("/decide")
 async def _ground_and_decide(
     app_state,
     state_text: str,
@@ -188,6 +187,7 @@ async def _ground_and_decide(
     return result, knowledge_info
 
 
+@router.post("/decide")
 async def decide(request: Request, body: DecideRequest):
     state = request.app.state
     raw_questions = body.model_dump()["questions"]
