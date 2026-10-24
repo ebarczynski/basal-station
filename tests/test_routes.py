@@ -19,7 +19,7 @@ def _route(path: str, method: str):
 
 def test_decide_route_signature_not_mangled():
     """The /decide endpoint must take a DecideRequest body, not raw helper args."""
-    endpoint = _route("/decide", "POST").endpoint
+    endpoint = _route("/api/decide", "POST").endpoint
     params = inspect.signature(endpoint).parameters
     assert "body" in params
     annotation = params["body"].annotation
@@ -31,17 +31,17 @@ def test_decide_route_signature_not_mangled():
 
 def test_core_routes_registered():
     expected = [
-        ("/system", "GET"),
-        ("/decide", "POST"),
-        ("/decide/raw", "POST"),
-        ("/eval", "POST"),
-        ("/recipes", "GET"),
-        ("/recipes/{key}", "GET"),
-        ("/recipes/{key}/run", "POST"),
-        ("/engine/start", "POST"),
-        ("/engine/stop", "POST"),
-        ("/models/download", "POST"),
-        ("/knowledge/search", "POST"),
+        ("/api/system", "GET"),
+        ("/api/decide", "POST"),
+        ("/api/decide/raw", "POST"),
+        ("/api/eval", "POST"),
+        ("/api/recipes", "GET"),
+        ("/api/recipes/{key}", "GET"),
+        ("/api/recipes/{key}/run", "POST"),
+        ("/api/engine/start", "POST"),
+        ("/api/engine/stop", "POST"),
+        ("/api/models/download", "POST"),
+        ("/api/knowledge/search", "POST"),
     ]
     for path, method in expected:
         _route(path, method)
