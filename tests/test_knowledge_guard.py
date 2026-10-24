@@ -141,6 +141,9 @@ def test_route_level_grounding_failure_is_visible_and_ungrounded():
         def __init__(self):
             self.payloads = []
 
+        async def healthy(self):
+            return True
+
         async def decide(self, payload):
             self.payloads.append(payload)
             return {"answers": {}}

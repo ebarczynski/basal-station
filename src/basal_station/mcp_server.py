@@ -68,17 +68,9 @@ async def _knowledge_service() -> KnowledgeService:
 
 async def _ensure_engine() -> None:
     manager = _engine_manager()
-    if await manager.healthy():
-        return
-    model = get_model(_settings.default_model)
-    if model is None:
-        raise EngineError(f"default_model '{_settings.default_model}' is not in the catalog")
-    ranked = rank_backends(detect(), model)
-    best = next((r for r in ranked if r.eligible), None)
-    if best is None:
-        raise EngineError("no eligible backend on this machine for the default model")
-    log.info("auto-starting engine: %s / %s", best.profile.key, model.key)
-    await manager.start(best.profile.key, model.key)
+    from .backends.manager import ensure_running
+
+    await ensure_running(manager, _settings)
 
 
 def _clean_questions(questions: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:

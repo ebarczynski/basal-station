@@ -9,7 +9,9 @@ Principles:
 Precedence: deferral > failed noul/score checks > low confidence > route
 mapping > pass action > fallback. Checks always override routes — fail closed.
 `pass_action` names the automation for the all-checks-passed case (gates);
-`fallback` stays the safe path for unmatched outcomes.
+`fallback` stays the safe path for unmatched outcomes. `flagged` is true
+when a non-automated branch fired (deferral, failed check, fallback) —
+derived from the branch, never from the action's name.
 """
 
 from __future__ import annotations
@@ -103,18 +105,23 @@ def apply_policy(answers: dict[str, dict[str, Any]], policy: dict[str, Any]) -> 
 
     if deferred:
         action = defer_action
+        branch = "deferred"
         reasons.append(f"deferred/low-confidence -> {defer_action}")
     elif violated:
         action = check_action
+        branch = "check_failed"
         reasons.append(f"check failed -> {check_action}")
     elif route_action is not None:
         action = route_action
+        branch = "route"
         reasons.append(f"route match -> {action}")
     elif "pass_action" in policy:
         action = policy["pass_action"]
+        branch = "pass"
         reasons.append(f"all checks passed -> {action}")
     else:
         action = fallback
+        branch = "fallback"
         reasons.append(f"no rule matched -> fallback {fallback}")
 
     confidences = [
@@ -123,7 +130,10 @@ def apply_policy(answers: dict[str, dict[str, Any]], policy: dict[str, Any]) -> 
     ]
     return {
         "action": action,
-        "flagged": action in (defer_action, check_action, fallback),
+        # flagged = a non-automated path fired (deferred / failed check /
+        # unmatched fallback). A matched route is a deliberate choice even
+        # when it points at a review queue — it must not read as an alarm.
+        "flagged": branch in ("deferred", "check_failed", "fallback"),
         "reasons": reasons,
         "min_confidence": round(min(confidences), 3) if confidences else None,
     }

@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from .. import __version__
 from ..backends import EngineError
+from ..backends.manager import ensure_running
 from ..backends.registry import (
     plan_gguf_offload,
     rank_backends,
@@ -143,7 +144,6 @@ async def _ground_and_decide(
     state_text: str,
     raw_questions: dict,
     knowledge_opts=None,
-    orders: int | None = None,
 ) -> tuple[dict, dict]:
     """Shared core: optional grounding -> engine call. Returns (result, knowledge_info)."""
     settings = app_state.settings
@@ -154,8 +154,6 @@ async def _ground_and_decide(
             for name, q in raw_questions.items()
         },
     }
-    if orders:
-        payload["orders"] = orders
 
     knowledge_info: dict = {"used": False}
     if knowledge_opts and knowledge_opts.enabled and settings.knowledge.enabled:
@@ -180,6 +178,8 @@ async def _ground_and_decide(
                 }
 
     try:
+        if not await app_state.engine.healthy() and settings.auto_backend:
+            await ensure_running(app_state.engine, settings)
         result = await app_state.engine.decide(payload)
     except EngineError as exc:
         raise HTTPException(503, str(exc)) from exc
@@ -192,7 +192,7 @@ async def decide(request: Request, body: DecideRequest):
     state = request.app.state
     raw_questions = body.model_dump()["questions"]
     result, knowledge_info = await _ground_and_decide(
-        state, body.state, raw_questions, body.knowledge, body.orders
+        state, body.state, raw_questions, body.knowledge
     )
     out = {**result, "knowledge": knowledge_info}
     if body.policy:
@@ -242,7 +242,7 @@ async def recipe_run(request: Request, key: str, body: dict | None = None):
         knowledge_opts = KnowledgeOptions(**body["knowledge"])
     raw_questions = body.get("questions") or r.questions
     result, knowledge_info = await _ground_and_decide(
-        request.app.state, state_text, raw_questions, knowledge_opts, body.get("orders")
+        request.app.state, state_text, raw_questions, knowledge_opts
     )
     policy_spec = body.get("policy") if body.get("policy") is not None else r.policy
     out = {**result, "knowledge": knowledge_info, "recipe": r.key}
@@ -264,7 +264,7 @@ async def eval_endpoint(request: Request, body: EvalRequest):
     for i, example in enumerate(body.examples):
         try:
             result, _ = await _ground_and_decide(
-                state, example.state, raw_questions, example.knowledge, body.orders
+                state, example.state, raw_questions, example.knowledge
             )
             results.append(result)
         except HTTPException as exc:

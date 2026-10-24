@@ -63,22 +63,32 @@ class EngineManager:
 
             # An engine may already be serving on the configured port (another
             # station/MCP/CLI client started it). Adopt it instead of spawning
-            # a duplicate that would fight over the port.
+            # a duplicate that would fight over the port — but only report
+            # what the engine verifies about itself (ADR-0003).
             if await self._external_healthy():
+                ident = await self._external_identity()
                 self._state.update(
                     running=True,
-                    backend=backend_key,
-                    model=model_key,
-                    mode=profile.mode,
+                    backend=None,
+                    model=ident.get("model"),
+                    mode=ident.get("mode"),
                     pid=None,
                     started_at=datetime.now(UTC).isoformat(),
                     command=["(adopted engine already listening on port)"],
-                    info={"adopted": True, "mode": profile.mode, "model": model.key},
+                    info={
+                        "adopted": True,
+                        "verified": bool(ident),
+                        "requested": {"backend": backend_key, "model": model_key},
+                    },
                     last_error=None,
                 )
                 self._log(
-                    f"adopted engine already serving on {self.settings.engine.base_url} "
-                    f"({backend_key}/{model_key})"
+                    f"adopted engine already serving on {self.settings.engine.base_url}: "
+                    + (
+                        f"model={ident.get('model')} mode={ident.get('mode')} (verified)"
+                        if ident
+                        else "identity unverified (/v1/models unreachable)"
+                    )
                 )
                 return self.status()
 
@@ -147,6 +157,33 @@ class EngineManager:
         except httpx.HTTPError:
             return False
 
+    async def _external_identity(self) -> dict:
+        """Best-effort parse of the engine's /v1/models (ADR-0003).
+
+        Returns {} when the engine cannot say what it serves — the adopted
+        state then stays "unverified" instead of echoing the request.
+        """
+        try:
+            resp = await self._client.get(
+                f"{self.settings.engine.base_url}/v1/models"
+            )
+            if resp.status_code != 200:
+                return {}
+            data = resp.json()
+        except Exception:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        model = data.get("model") or data.get("model_id") or data.get("id")
+        models = data.get("models")
+        if not model and isinstance(models, list) and models:
+            first = models[0]
+            if isinstance(first, dict):
+                model = first.get("id") or first.get("model")
+            elif isinstance(first, str):
+                model = first
+        return {"model": model, "mode": data.get("mode")}
+
     async def stop(self) -> dict:
         async with self._lock:
             await self._stop_locked()
@@ -194,10 +231,20 @@ class EngineManager:
             if self._proc is None or self._proc.returncode is not None:
                 # Our child died — most likely the port was claimed by a
                 # concurrent starter (station + MCP + CLI racing). Succeed if
-                # another engine ends up serving, otherwise fail fast.
+                # another engine ends up serving, otherwise fail fast. The
+                # adopted engine's identity is whatever it verifies (ADR-0003).
                 if await self._external_healthy():
-                    self._state["pid"] = None
-                    self._state["info"] = {**self._state.get("info", {}), "adopted": True}
+                    ident = await self._external_identity()
+                    self._state.update(
+                        pid=None,
+                        model=ident.get("model"),
+                        mode=ident.get("mode"),
+                        info={
+                            **self._state.get("info", {}),
+                            "adopted": True,
+                            "verified": bool(ident),
+                        },
+                    )
                     return True
                 return False
             try:
@@ -247,3 +294,33 @@ class EngineManager:
 
 def create_manager(settings: AppSettings) -> EngineManager:
     return EngineManager(settings)
+
+
+async def ensure_running(manager: EngineManager, settings: AppSettings) -> dict:
+    """Start the configured default model on the best eligible backend unless
+    an engine is already healthy on the port. Raises EngineError with the real
+    reason when nothing can start.
+
+    Shared by the HTTP API (/api/decide auto-start) and the MCP server, so
+    both entry paths behave the same way.
+    """
+    if await manager.healthy():
+        return manager.status()
+    from ..api.localrepo import local_formats  # function-level: avoids api<-backends cycle
+    from ..catalog import get_model
+    from ..hardware import detect
+
+    model = get_model(settings.default_model)
+    if model is None:
+        raise EngineError(
+            f"default_model '{settings.default_model}' is not in the catalog"
+        )
+    ranked = rank_backends(
+        detect(), model,
+        local_formats=local_formats(model),
+        gguf_ngl_override=settings.engine.gguf_ngl,
+    )
+    best = next((r for r in ranked if r.eligible), None)
+    if best is None:
+        raise EngineError("no eligible backend on this machine for the default model")
+    return await manager.start(best.profile.key, model.key)

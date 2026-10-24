@@ -103,3 +103,16 @@ def test_policy_pass_action_not_used_when_check_fails():
 def test_policy_default_fallback_without_spec():
     out = apply_policy({"q": {"type": "choice", "choice": "x", "confidence": 0.9}}, {})
     assert out["action"] == "human_review"
+
+
+def test_policy_route_to_review_queue_is_not_flagged():
+    """Regression (grill F7): a confident route to a review queue is a
+    deliberate action, not an alarm — flagged must derive from the branch,
+    not from string-equality with fallback/defer actions."""
+    out = apply_policy(
+        {"routing": {"type": "choice", "choice": "human_review", "confidence": 0.9}},
+        {"routes": {"routing.human_review": "human_review"}, "fallback": "human_review"},
+    )
+    assert out["action"] == "human_review"
+    assert out["flagged"] is False
+    assert any("route match" in r for r in out["reasons"])
