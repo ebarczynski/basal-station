@@ -29,6 +29,11 @@ class KnowledgeBaseUnavailable(RuntimeError):
     pass
 
 
+# ADR-0001: the one tool grounding may use, and only when the server actually
+# lists it. Everything else is a visible refusal, never silent text ingestion.
+GROUNDING_TOOL = "context"
+
+
 def _extract(result: Any) -> Any:
     """Flatten a CallToolResult into JSON-ish data or plain text."""
     texts = []
@@ -114,6 +119,15 @@ class McpStdioConnection:
             raise KnowledgeBaseUnavailable(
                 f"knowledge-palace is not connected: {self._error or 'server not reachable'}"
             )
+        if not self._tools:
+            # The connect-time listing failed or came back empty — retry now
+            # rather than reporting an empty tool set forever.
+            try:
+                async with self._lock:
+                    listed = await asyncio.wait_for(self._session.list_tools(), timeout=15)
+                self._tools = [t.name for t in listed.tools]
+            except Exception:
+                return []
         return list(self._tools)
 
     def is_alive(self) -> bool:
@@ -210,15 +224,25 @@ class KnowledgeService:
             self.config.timeout_s * 2,
         )
 
-    async def context(self, query: str, limit: int | None = None) -> Any:
-        conn = await self._ensure_alive()
-        return await conn.call(
-            "context", {"query": query, "limit": limit or self.config.default_top_k},
-            self.config.timeout_s,
-        )
-
     async def similar(self, text: str, limit: int = 5) -> Any:
         conn = await self._ensure_alive()
         return await conn.call(
             "similar", {"text": text, "limit": limit}, self.config.timeout_s
+        )
+
+    async def context(self, query: str, limit: int | None = None) -> Any:
+        conn = await self._ensure_alive()
+        # ADR-0001: grounding requires a verifiable `context` tool. A server
+        # without it answers unknown tools with human-readable text, which a
+        # generic client cannot tell apart from real hits — and that text must
+        # never enter a decision state as "Reference knowledge". Fail visibly.
+        tools = await conn.list_tools()
+        if GROUNDING_TOOL not in tools:
+            raise KnowledgeBaseUnavailable(
+                f"knowledge-palace lacks the '{GROUNDING_TOOL}' tool "
+                f"(has: {', '.join(tools) or 'none'}); grounding refused (ADR-0001)"
+            )
+        return await conn.call(
+            "context", {"query": query, "limit": limit or self.config.default_top_k},
+            self.config.timeout_s,
         )
