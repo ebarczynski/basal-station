@@ -45,11 +45,12 @@ class RankedBackend:
     profile: BackendProfile
     eligible: bool
     reason: str
-    model_ref: str | None = None      # repo id, or local file path for gguf when cached
+    model_ref: str | None = None      # repo id passed as --model (tokenizer/identity)
     quant: str | None = None
-    ngl: int | None = None
+    ngl: int | None = None            # display-only offload estimate (ADR-0002)
     est_vram_gb: float | None = None
     local: bool = False               # weights already in the HF cache
+    gguf_file: str | None = None      # local .gguf file, passed as --gguf <file>
     extra_args: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
@@ -65,8 +66,23 @@ class RankedBackend:
             "ngl": self.ngl,
             "est_vram_gb": self.est_vram_gb,
             "local": self.local,
+            "gguf_file": self.gguf_file,
             "media": self.profile.media,
         }
+
+
+def _gguf_file_for(local_formats: dict, quant: str | None) -> str | None:
+    """Local downloaded .gguf file matching the quant, or None (ADR-0002)."""
+    files = list(local_formats.get("gguf_files") or [])
+    if not files:
+        return None
+    if quant:
+        matches = [f for f in files if quant.lower() in f.lower()]
+        files = matches or files
+    gguf_dir = local_formats.get("gguf_dir")
+    if not gguf_dir:
+        return None
+    return str(Path(gguf_dir) / files[0])
 
 
 def _requirements_met(profile: BackendProfile, hw: HardwareProfile) -> str | None:
@@ -110,7 +126,7 @@ def rank_backends(
     hw: HardwareProfile,
     model: ModelEntry,
     prefer_media: bool = False,
-    local_formats: dict[str, bool] | None = None,
+    local_formats: dict | None = None,
     gguf_ngl_override: str | int = "auto",
 ) -> list[RankedBackend]:
     """Rank backend profiles for this machine + model. Best first."""
@@ -118,9 +134,6 @@ def rank_backends(
     cuda = hw.cuda_gpu
     unified_budget = int(hw.ram_bytes * 0.75)
     ranked: list[RankedBackend] = []
-    # A downloaded single-file GGUF is passed to basal-serve as a local path.
-    gguf_local_path = local_formats.get("gguf_path")
-    gguf_is_local = bool(local_formats.get("gguf"))
 
     for profile in BACKENDS:
         req_issue = _requirements_met(profile, hw)
@@ -146,10 +159,12 @@ def rank_backends(
             ranked.append(
                 RankedBackend(
                     profile, True,
-                    f"offload ~{offload_pct}% of layers ({quant}) to {cuda.name}",
-                    model_ref=gguf_local_path or model.repo("gguf"), quant=quant, ngl=ngl,
+                    f"offload ~{offload_pct}% of layers ({quant}) to {cuda.name} "
+                    "(engine decides the real offload; estimate only)",
+                    model_ref=model.repo("gguf"), quant=quant, ngl=ngl,
                     est_vram_gb=round(est / GIB, 1),
-                    local=gguf_is_local,
+                    local=bool(local_formats.get("gguf")),
+                    gguf_file=_gguf_file_for(local_formats, quant),
                 )
             )
             continue
@@ -210,8 +225,9 @@ def rank_backends(
         ranked.append(
             RankedBackend(
                 profile, True, f"CPU/Metal path — {suffix}",
-                model_ref=gguf_local_path or model.repo("gguf"), quant=quant,
-                local=gguf_is_local,
+                model_ref=model.repo("gguf"), quant=quant,
+                local=bool(local_formats.get("gguf")),
+                gguf_file=_gguf_file_for(local_formats, quant),
             )
         )
 
@@ -296,7 +312,12 @@ def build_engine_args(
     engine_port: int,
     extra_args: list[str] | None = None,
 ) -> tuple[list[str], dict]:
-    """Assemble the basal-serve command line for a backend choice."""
+    """Assemble the basal-serve command line for a backend choice.
+
+    ADR-0002: the engine's real GGUF interface is `--gguf <file>` (v2.3.5 and
+    v2.4.1 define neither -ngl nor --threads). `--model` carries the repo id
+    for tokenizer/identity; a resolved local .gguf file rides on --gguf.
+    """
     args = [
         resolve_engine_command("basal-serve"),
         "--model",
@@ -316,10 +337,9 @@ def build_engine_args(
     }
     if profile.fmt == "gguf" and ranked.quant:
         info["quant"] = ranked.quant
-    if ranked.ngl is not None:
-        args += ["-ngl", str(ranked.ngl)]
-        info["ngl"] = ranked.ngl
-        args += ["--threads", str(max(4, hw.cpu_count - 2))]
+    if profile.fmt == "gguf" and ranked.gguf_file:
+        args += ["--gguf", ranked.gguf_file]
+        info["gguf_file"] = ranked.gguf_file
     if profile.media and model.media:
         args += ["--media", "on"]
         info["media"] = True

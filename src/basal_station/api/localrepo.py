@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from ..catalog import ModelEntry, format_size_bytes
 
@@ -17,9 +18,35 @@ def cached_repo_ids() -> frozenset[str]:
         return frozenset()
 
 
-def local_formats(model: ModelEntry) -> dict[str, bool]:
+@lru_cache(maxsize=16)
+def cached_gguf_payload(repo_id: str) -> tuple[str, tuple[str, ...]] | None:
+    """(snapshot_dir, relative .gguf file names) for a cached GGUF repo, or None."""
+    try:
+        from huggingface_hub import scan_cache_dir
+
+        for repo in scan_cache_dir().repos:
+            if repo.repo_id == repo_id:
+                root = Path(repo.repo_path)
+                files = tuple(sorted(str(p.relative_to(root)) for p in root.rglob("*.gguf")))
+                return (str(root), files)
+    except Exception:
+        return None
+    return None
+
+
+def local_formats(model: ModelEntry) -> dict[str, bool | str | tuple[str, ...]]:
     cached = cached_repo_ids()
-    return {fmt: repo in cached for fmt, repo in model.repos.items()}
+    out: dict[str, bool | str | tuple[str, ...]] = {
+        fmt: repo in cached for fmt, repo in model.repos.items()
+    }
+    # ADR-0002: the engine takes GGUF weights as a file (--gguf <file>), so
+    # expose where the downloaded single-file quants actually live.
+    gguf_repo = model.repo("gguf")
+    if gguf_repo and out.get("gguf"):
+        payload = cached_gguf_payload(gguf_repo)
+        if payload:
+            out["gguf_dir"], out["gguf_files"] = payload
+    return out
 
 
 def model_payload(model: ModelEntry) -> dict:
