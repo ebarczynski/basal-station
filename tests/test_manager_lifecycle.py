@@ -84,6 +84,14 @@ def test_external_identity_parses_shape_variants():
         ({"model_id": "m2"}, {"model": "m2", "mode": None}),
         ({"models": [{"id": "m3"}]}, {"model": "m3", "mode": None}),
         ({"models": ["m4"]}, {"model": "m4", "mode": None}),
+        # the real basal-serve shape (measured): name + per-model mode
+        (
+            {"models": [{"name": "basal-omni-1.0-max-MLX", "mode": "mlx"}]},
+            {"model": "basal-omni-1.0-max-MLX", "mode": "mlx"},
+        ),
+        # a 200 with no usable identity must be unverified, not "verified: None"
+        ({"models": []}, {}),
+        ({"models": [{"release_date": "2026-10-22"}]}, {}),
         ([1, 2], {}),
         (None, {}),
     ]
@@ -109,6 +117,22 @@ def test_external_identity_bad_status_or_error_is_unverified():
     mgr = _manager()
     mgr._client = _FakeClient({"models": _FakeResp(200, RuntimeError("boom"))})
     assert asyncio.run(run()) == {}
+
+
+def test_adoption_mismatch_gets_warning():
+    from basal_station.backends.manager import _compare_identity
+    from basal_station.catalog import get_model
+
+    model = get_model("omni-1.0-max")
+    # the real engine name for this model - token match, no warning
+    verified, mismatch = _compare_identity({"model": "basal-omni-1.0-max-MLX"}, model)
+    assert verified and not mismatch
+    # a different model on the port - flagged
+    verified, mismatch = _compare_identity({"model": "basal-1.5-mini"}, model)
+    assert verified and mismatch
+    # unknown identity - never a mismatch (only silence)
+    verified, mismatch = _compare_identity({}, model)
+    assert not verified and not mismatch
 
 
 def test_ensure_running_skips_when_healthy(monkeypatch):

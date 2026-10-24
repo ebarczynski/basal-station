@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections import deque
 from datetime import UTC, datetime
@@ -16,6 +17,23 @@ from .registry import build_engine_args, rank_backends
 
 class EngineError(RuntimeError):
     pass
+
+
+def _compare_identity(ident: dict, model) -> tuple[bool, bool]:
+    """(verified, mismatch) between what the engine reports and the request.
+
+    Comparison runs on separator-stripped names ("basal-omni-1.0-max-MLX" →
+    "basalomni10maxmlx") with substring containment both ways — token sets
+    cannot tell 1.0 from 1.1. The HF repo id is excluded on purpose (the
+    author prefix never appears in engine reports). Unknown identity counts
+    as verified=False but never as a mismatch (ADR-0003: report only facts).
+    """
+    verified_model = ident.get("model")
+    if not verified_model:
+        return False, False
+    norm = lambda s: re.sub(r"[^a-z0-9]", "", s.lower())
+    key, engine = norm(model.key), norm(str(verified_model))
+    return True, key not in engine and engine not in key
 
 
 class EngineManager:
@@ -67,6 +85,16 @@ class EngineManager:
             # what the engine verifies about itself (ADR-0003).
             if await self._external_healthy():
                 ident = await self._external_identity()
+                verified, mismatch = _compare_identity(ident, model)
+                info: dict = {
+                    "adopted": True,
+                    "verified": verified,
+                    "requested": {"backend": backend_key, "model": model_key},
+                }
+                if mismatch:
+                    info["warning"] = (
+                        "adopted engine serves a different model than requested"
+                    )
                 self._state.update(
                     running=True,
                     backend=None,
@@ -75,20 +103,17 @@ class EngineManager:
                     pid=None,
                     started_at=datetime.now(UTC).isoformat(),
                     command=["(adopted engine already listening on port)"],
-                    info={
-                        "adopted": True,
-                        "verified": bool(ident),
-                        "requested": {"backend": backend_key, "model": model_key},
-                    },
+                    info=info,
                     last_error=None,
                 )
                 self._log(
                     f"adopted engine already serving on {self.settings.engine.base_url}: "
                     + (
                         f"model={ident.get('model')} mode={ident.get('mode')} (verified)"
-                        if ident
-                        else "identity unverified (/v1/models unreachable)"
+                        if verified
+                        else "identity unverified (/v1/models gave nothing usable)"
                     )
+                    + (f" — WARNING: {info['warning']}" if mismatch else "")
                 )
                 return self.status()
 
@@ -160,8 +185,10 @@ class EngineManager:
     async def _external_identity(self) -> dict:
         """Best-effort parse of the engine's /v1/models (ADR-0003).
 
-        Returns {} when the engine cannot say what it serves — the adopted
-        state then stays "unverified" instead of echoing the request.
+        The real engine answers {"models": [{"name": ..., "mode": ...}]};
+        generic OpenAI-ish shapes are tolerated. Returns {} when nothing can
+        be extracted — the adopted state then stays "unverified" instead of
+        echoing the request or claiming a verification that found nothing.
         """
         try:
             resp = await self._client.get(
@@ -175,14 +202,18 @@ class EngineManager:
         if not isinstance(data, dict):
             return {}
         model = data.get("model") or data.get("model_id") or data.get("id")
+        mode = data.get("mode")
         models = data.get("models")
         if not model and isinstance(models, list) and models:
             first = models[0]
             if isinstance(first, dict):
-                model = first.get("id") or first.get("model")
+                model = first.get("id") or first.get("model") or first.get("name")
+                mode = mode or first.get("mode")
             elif isinstance(first, str):
                 model = first
-        return {"model": model, "mode": data.get("mode")}
+        if not model:
+            return {}
+        return {"model": model, "mode": mode}
 
     async def stop(self) -> dict:
         async with self._lock:
