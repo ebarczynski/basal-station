@@ -48,8 +48,15 @@
     <section class="card">
       <div class="row spread">
         <h2>State</h2>
-        <button id="btnExample" class="ghost small">load example</button>
+        <div class="row" style="margin:0">
+          <select id="recipeSelect" style="width:auto;max-width:220px" title="Load a curated decision recipe">
+            <option value="">cookbook…</option>
+          </select>
+          <button id="btnLoadRecipe" class="ghost small">load</button>
+          <button id="btnExample" class="ghost small">example</button>
+        </div>
       </div>
+      <div id="recipeHint" class="small muted hidden"></div>
       <textarea id="stateInput" rows="7"
         placeholder="Paste the message, document, trace or transcript to judge…"></textarea>
 

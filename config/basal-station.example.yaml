@@ -23,7 +23,8 @@ engine:
 
 knowledge:
   enabled: true
-  # knowledge-palace MCP server (stdio). Example from a ZCode install:
+  # knowledge-palace MCP server (stdio) — https://github.com/ebarczynski/knowledge-palace
+  # Example from a ZCode install:
   #   ["/Users/you/Documents/knowledge-palace/.venv/bin/kp", "mcp"]
   command: ["kp", "mcp"]
   env: {}

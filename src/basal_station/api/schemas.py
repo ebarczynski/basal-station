@@ -30,8 +30,22 @@ class DecideRequest(BaseModel):
     state: str
     questions: dict[str, QuestionSpec] = Field(min_length=1)
     knowledge: KnowledgeOptions | None = None
+    policy: dict[str, Any] | None = None  # applied by basal-station, not the engine
     orders: int | None = None      # 2 = mitigate option-order sensitivity (2x cost)
     media: list[dict[str, Any]] | None = None  # eager backend only
+
+
+class EvalExample(BaseModel):
+    state: str
+    labels: dict[str, Any]
+    knowledge: KnowledgeOptions | None = None
+
+
+class EvalRequest(BaseModel):
+    questions: dict[str, QuestionSpec] = Field(min_length=1)
+    examples: list[EvalExample] = Field(min_length=1)
+    threshold: float = 0.5
+    orders: int | None = None
 
 
 class DownloadRequest(BaseModel):

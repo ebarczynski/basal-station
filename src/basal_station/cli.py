@@ -99,13 +99,85 @@ def cmd_download(args: argparse.Namespace) -> int:
 
 
 def cmd_decide(args: argparse.Namespace) -> int:
-    from .backends import EngineManager
+    """One-shot decision. Exit 0 = decided, 3 = deferred / flagged by policy.
 
-    payload = json.loads(Path(args.file).read_text())
+    Built for shell pipelines and agent harnesses:
+        echo '{"state": ..., "questions': ...}' | basal-station decide -
+    """
+    from .policy import apply_policy
+
+    if args.file == "-":
+        raw = sys.stdin.read()
+    else:
+        raw = Path(args.file).read_text()
+    payload = json.loads(raw)
+
     settings = load_settings(args.config)
-    mgr = EngineManager(settings)
-    result = asyncio.run(mgr.decide(payload))
-    print(_fmt(result))
+
+    async def run() -> tuple[dict, int]:
+        from .backends import EngineManager
+
+        mgr = EngineManager(settings)
+        result = await mgr.decide(payload)
+        policy_spec = payload.get("policy") or args.policy_json
+        if policy_spec:
+            result["policy"] = apply_policy(result.get("answers", {}), policy_spec)
+        code = 0
+        if (result.get("policy") or {}).get("flagged") or any(a.get("deferred") for a in result.get("answers", {}).values()):
+            code = 3
+        return result, code
+
+    result, code = asyncio.run(run())
+    print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    return code
+
+
+def cmd_recipes(args: argparse.Namespace) -> int:
+    from .recipes import list_recipes, recipe_payload
+
+    for r in list_recipes():
+        if args.role and r.role != args.role:
+            continue
+        print(f"{r.key:<22} [{r.role}] {r.title}")
+        print(f"{'':<22} {r.description.splitlines()[0]}")
+    if args.json:
+        print(_fmt([recipe_payload(r) for r in list_recipes()]))
+    return 0
+
+
+def cmd_eval(args: argparse.Namespace) -> int:
+    from .eval import evaluate
+
+    questions = json.loads(Path(args.questions).read_text())
+    examples = []
+    with open(args.file) as fh:
+        for line in fh:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                examples.append(json.loads(line))
+    if not examples:
+        print("no examples found", file=sys.stderr)
+        return 2
+
+    settings = load_settings(args.config)
+
+    async def run() -> dict:
+        from .backends import EngineManager
+
+        mgr = EngineManager(settings)
+        results, labels = [], []
+        for ex in examples:
+            try:
+                res = await mgr.decide({"state": ex["state"], "questions": questions})
+            except Exception as exc:
+                print(f"warning: {str(exc)[:160]}", file=sys.stderr)
+                res = {"answers": {}}
+            results.append(res)
+            labels.append(ex.get("labels", {}))
+        return evaluate(questions, results, labels, args.threshold)
+
+    report = asyncio.run(run())
+    print(_fmt(report))
     return 0
 
 
@@ -168,8 +240,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--format", default="gguf", choices=["gguf", "mlx", "fp8", "safetensors"])
     p.add_argument("--quant", default=None, help="GGUF quant, e.g. Q4_K_M")
 
-    p = with_config(sub.add_parser("decide", help="POST a /v1/systemone JSON file to a running engine"))
-    p.add_argument("file", help="JSON file with state + questions")
+    p = with_config(sub.add_parser(
+        "decide",
+        help="POST a /v1/systemone JSON (file or '-' for stdin) to a running engine; "
+             "exit 3 when the policy flags/defers",
+    ))
+    p.add_argument("file", help="JSON file, or '-' for stdin")
+    p.add_argument("--policy", default=None, dest="policy_json",
+                   help="policy spec as inline JSON, e.g. '{\"fallback\":\"review\"}'")
+
+    with_config(sub.add_parser("recipes", help="list the recipe cookbook"))
+    p.add_argument("--role", default=None, help="filter: triage|router|gate|judge|ground")
+    p.add_argument("--json", action="store_true", help="also dump full recipe specs")
+
+    p = with_config(sub.add_parser("eval", help="score a labeled JSONL set ({state, labels})"))
+    p.add_argument("file", help="JSONL file with {state, labels} per line")
+    p.add_argument("--questions", required=True, help="questions spec JSON file")
+    p.add_argument("--threshold", type=float, default=0.5)
 
     p = with_config(sub.add_parser("ask", help="ask the knowledge base"))
     p.add_argument("question")
@@ -191,6 +278,8 @@ def main(argv: list[str] | None = None) -> int:
         "models": cmd_models,
         "download": cmd_download,
         "decide": cmd_decide,
+        "recipes": cmd_recipes,
+        "eval": cmd_eval,
         "ask": cmd_ask,
         "search": cmd_search,
     }[args.cmd]

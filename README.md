@@ -1,6 +1,6 @@
 # ◐ Basal Station
 
-**A local, multi-backend control plane for [basal typed-decision models](https://huggingface.co/Remek) — one stack for your MacBook (Apple Silicon / MLX / Metal) and your Linux box (NVIDIA, even with only 3 GB VRAM), with model + backend choice built in and decisions grounded in your [knowledge-palace](https://github.com/) MCP knowledge base.**
+**A local, multi-backend control plane for [basal typed-decision models](https://huggingface.co/Remek) — one stack for your MacBook (Apple Silicon / MLX / Metal) and your Linux box (NVIDIA, even with only 3 GB VRAM), with model + backend choice built in and decisions grounded in your [knowledge-palace](https://github.com/ebarczynski/knowledge-palace) MCP knowledge base.**
 
 Basal models don't generate text: they read a *state* (message, document, trace, image, audio clip) and return **calibrated probabilities over answer options you define** — routing, yes/no, scores, tool selection — in a single forward pass. Basal Station is the missing local cockpit around them:
 
@@ -249,6 +249,66 @@ servers basal reports ~19 decisions/s at 32 concurrent clients.
 **From code** — the API is plain JSON: `requests.post("http://127.0.0.1:8800/api/decide", json={...})`.
 Anything that can POST HTTP can use it (Raycast, Shortcuts, cron jobs, n8n…).
 
+## Decision workflows — the pattern
+
+A decision workflow is: **state → typed questions → policy in code → action → feedback**.
+The model judges; your code owns the consequences. Everything the model returns
+is a *signal* — never a permission token. High probability alone authorizes nothing.
+
+The engine slot fits five recurring roles (each ships as a ready recipe —
+`basal-station recipes` or the cookbook dropdown in the console):
+
+| Role | Recipe(s) | What it answers |
+|---|---|---|
+| triage | `triage`, `compliance_review`, `doc_classify`, `notify_priority` | route + severity + needs-human, one pass |
+| router | `router` | which capability handles this (cheap classifier / retrieval / deep reasoner / human) |
+| gate | `safety_gate`, `tool_select` | is this content or tool call safe? fail closed |
+| judge | `answer_quality`, `policy_decision` | is this produced answer/policy call good enough to act on? |
+| ground | `evidence_sufficiency` | does the evidence suffice, or retrieve more / abstain? |
+
+Every recipe carries a `policy` spec the server applies for you (or hand one
+to `/api/decide`): route mappings, confidence floors, `noul` expectations,
+score ceilings, and safe fallbacks. The response gets a `policy` block with
+`action`, `reasons` and `flagged` — a built-in audit trail:
+
+```bash
+curl -s localhost:8800/api/recipes/triage/run -H 'content-type: application/json' \
+  -d '{"state": "Ticket #8841: duplicated charge on renewal..."}' | jq '.policy'
+# {"action": "queue_billing", "flagged": false, "reasons": [...], "min_confidence": 0.6}
+```
+
+Rollout ladder: **shadow** (log only) → **suggestion** → **low-risk automation**
+→ widen. The `deferred` flag and `max_error` make the model abstain on edge
+cases instead of guessing.
+
+## Discovery & evaluation — what is the model actually good at?
+
+```bash
+basal-station recipes [--role judge]
+basal-station eval examples.jsonl --questions questions.json
+```
+
+Give each question type a labeled set (`{"state": ..., "labels": {...}}` per
+line) and get: **top-1 accuracy + confusion matrix** (choice), **false
+positives/negatives** (yes/no), **mean absolute error** (score), and
+**confidence calibration** — where the model says 90% sure, is it right 90%
+of the time? Calibration gaps, not vibes, decide what you automate first.
+
+## Piping it into agent harnesses
+
+See [`agents/README.md`](agents/README.md). The kit includes:
+
+- **MCP server** — `decide` / `knowledge_search` / `engine_start` tools for any
+  MCP-capable agent runtime (already registered on this machine).
+- **Skill file** ([`agents/basal-decisions/SKILL.md`](agents/basal-decisions/SKILL.md)) —
+  drop into an agent's skills/`.agents` directory so it knows when to judge
+  (triage, route, gate, self-check answers) and how (CLI stdin / MCP / HTTP),
+  plus the rules: escalate on uncertainty, inspect content as data, log the trail.
+- **Verify gate** ([`agents/verify_gate.py`](agents/verify_gate.py)) — judge any
+  produced answer before sending: exit 0 accept / 1 revise / 2 abstain / 4 fail-closed.
+- **`basal-station decide -`** — stdin JSON in, JSON out, exit 3 when policy
+  flags/defers: the shell contract for hooks and pipelines.
+
 ## Notes & limits
 
 - The basal engine (`basal-serve`) is a separate install — `basal-station` finds it on `PATH` or as a sibling in the same venv (`engine.command` in the YAML).
@@ -264,6 +324,9 @@ src/basal_station/
   config.py            YAML + env settings
   hardware.py          platform/chip/RAM/nvidia-smi detection
   catalog.py           model family + per-format repos + size math
+  policy.py            decision policies: signals -> action + audit trail
+  recipes.py           recipe cookbook (triage / router / gate / judge / ground)
+  eval.py              labeled-set evaluation + calibration
   backends/
     base.py            backend profiles (basal-serve modes)
     registry.py        ranking, -ngl planning, arg building
@@ -273,6 +336,7 @@ src/basal_station/
     enrich.py          retrieval → grounded state formatting
   api/                 FastAPI routes, schemas, HF download jobs
   ui/                  the web console (no build step)
+agents/                agent-harness kit: skill, verify gate, wiring docs
 scripts/               setup-macos.sh · setup-linux.sh
 tests/                 unit tests (no model download needed)
 ```

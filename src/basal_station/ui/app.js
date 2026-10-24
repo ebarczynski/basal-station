@@ -13,6 +13,7 @@ const state = {
   downloads: {},
   qSeq: 0,
   defaultModel: "omni-1.0-max",
+  recipePolicy: null,
 };
 
 /* ---------------- helpers ---------------- */
@@ -450,6 +451,24 @@ function renderResult(answers, usage) {
   }
 }
 
+function renderPolicy(policy) {
+  const old = $("#policyBox");
+  if (old) old.remove();
+  if (!policy) return;
+  const box = document.createElement("div");
+  box.id = "policyBox";
+  box.className = "qcard";
+  box.style.marginTop = "10px";
+  const badge = policy.flagged
+    ? `<span class="tag-deferred">${escapeHtml(policy.action)}</span>`
+    : `<span class="r-choice">→ ${escapeHtml(policy.action)}</span>`;
+  box.innerHTML =
+    `<div class="r-head"><span class="r-name" style="color:var(--accent2)">policy</span>${badge}` +
+    (policy.min_confidence != null ? `<span class="small muted">min confidence ${(policy.min_confidence * 100).toFixed(0)}%</span>` : "") +
+    `</div><div class="small muted">${escapeHtml((policy.reasons || []).join(" · "))}</div>`;
+  $("#results").appendChild(box);
+}
+
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -470,6 +489,7 @@ async function runDecision() {
       top_k: parseInt($("#topk").value, 10) || 5,
     },
   };
+  if (state.recipePolicy) body.policy = state.recipePolicy;
   if ($("#chkOrders").checked) body.orders = 2;
 
   const btn = $("#btnRun");
@@ -478,6 +498,7 @@ async function runDecision() {
   try {
     const result = await api("/api/decide", { method: "POST", body });
     renderResult(result.answers, result.usage);
+    renderPolicy(result.policy);
     if (result.knowledge?.used) {
       const k = result.knowledge;
       $("#usageLine").textContent =
@@ -541,6 +562,46 @@ async function kbAsk() {
   }
 }
 
+/* ---------------- cookbook ---------------- */
+
+let recipeCache = [];
+
+async function loadCookbook() {
+  try {
+    recipeCache = await api("/api/recipes");
+    const sel = $("#recipeSelect");
+    const roles = [...new Set(recipeCache.map((r) => r.role))].sort();
+    for (const role of roles) {
+      const og = document.createElement("optgroup");
+      og.label = role;
+      for (const r of recipeCache.filter((x) => x.role === role)) {
+        const o = document.createElement("option");
+        o.value = r.key;
+        o.textContent = r.title;
+        og.appendChild(o);
+      }
+      sel.appendChild(og);
+    }
+  } catch (e) { /* cookbook is optional sugar */ }
+}
+
+function loadRecipe() {
+  const key = $("#recipeSelect").value;
+  const r = recipeCache.find((x) => x.key === key);
+  if (!r) return;
+  $("#stateInput").value = r.sample_state;
+  $("#questionList").innerHTML = "";
+  for (const [name, spec] of Object.entries(r.questions)) {
+    addQuestion({ name, ...spec });
+  }
+  const hint = $("#recipeHint");
+  hint.textContent = `${r.title} — ${r.description}`;
+  hint.classList.remove("hidden");
+  if (r.policy) {
+    state.recipePolicy = r.policy;
+  }
+}
+
 /* ---------------- example ---------------- */
 
 function loadExample() {
@@ -578,6 +639,7 @@ function wire() {
   $("#btnRun").onclick = runDecision;
   $("#btnAddQ").onclick = () => addQuestion();
   $("#btnExample").onclick = loadExample;
+  $("#btnLoadRecipe").onclick = loadRecipe;
   $("#btnSearch").onclick = kbSearch;
   $("#btnAsk").onclick = kbAsk;
   $("#kbSearchInput").addEventListener("keydown", (e) => e.key === "Enter" && kbSearch());
@@ -590,5 +652,6 @@ function wire() {
 wire();
 loadSystem();
 loadModels();
+loadCookbook();
 setInterval(loadSystem, 3000);
 setInterval(loadLogs, 4000);

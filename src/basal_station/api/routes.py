@@ -14,8 +14,11 @@ from ..backends.registry import (
     rank_models_for_hardware,
 )
 from ..catalog import format_size_bytes, get_model, list_models
+from ..eval import evaluate
 from ..hardware import detect
 from ..knowledge import KnowledgeBaseUnavailable, auto_query, ground_state, hits_summary
+from ..policy import apply_policy
+from ..recipes import get_recipe, list_recipes, recipe_payload
 from . import downloads
 from .localrepo import cached_repo_ids, local_formats, model_payload
 from .schemas import (
@@ -24,6 +27,7 @@ from .schemas import (
     DecideRequest,
     DownloadRequest,
     EngineStartRequest,
+    EvalRequest,
     SearchRequest,
     SimilarRequest,
 )
@@ -135,32 +139,38 @@ async def engine_logs(request: Request, n: int = 120):
 # ---------------------------------------------------------------- decide
 
 @router.post("/decide")
-async def decide(request: Request, body: DecideRequest):
-    state = request.app.state
-    settings = state.settings
-    raw_questions = body.model_dump()["questions"]
+async def _ground_and_decide(
+    app_state,
+    state_text: str,
+    raw_questions: dict,
+    knowledge_opts=None,
+    orders: int | None = None,
+) -> tuple[dict, dict]:
+    """Shared core: optional grounding -> engine call. Returns (result, knowledge_info)."""
+    settings = app_state.settings
     payload: dict = {
-        "state": body.state,
+        "state": state_text,
         "questions": {
             name: {k: v for k, v in q.items() if v not in (None, {}, "")}
             for name, q in raw_questions.items()
         },
     }
-    payload.update(body.model_dump(exclude_none=True, exclude={"state", "questions", "knowledge"}))
+    if orders:
+        payload["orders"] = orders
 
     knowledge_info: dict = {"used": False}
-    if body.knowledge and body.knowledge.enabled and settings.knowledge.enabled:
-        if not state.knowledge.available():
+    if knowledge_opts and knowledge_opts.enabled and settings.knowledge.enabled:
+        if not app_state.knowledge.available():
             knowledge_info = {"used": False, "error": "knowledge base not connected"}
         else:
             t0 = time.monotonic()
-            query = body.knowledge.query or auto_query(body.state, raw_questions)
+            query = knowledge_opts.query or auto_query(state_text, raw_questions)
             try:
-                hits = await state.knowledge.context(query, body.knowledge.top_k)
+                hits = await app_state.knowledge.context(query, knowledge_opts.top_k)
             except Exception as exc:
                 knowledge_info = {"used": False, "error": str(exc)[:300]}
             else:
-                grounded, included = ground_state(body.state, hits, query)
+                grounded, included = ground_state(state_text, hits, query)
                 payload["state"] = grounded
                 knowledge_info = {
                     "used": True,
@@ -171,11 +181,23 @@ async def decide(request: Request, body: DecideRequest):
                 }
 
     try:
-        result = await state.engine.decide(payload)
+        result = await app_state.engine.decide(payload)
     except EngineError as exc:
         raise HTTPException(503, str(exc)) from exc
-    return {**result, "knowledge": knowledge_info,
-            "grounded_state": payload["state"] if knowledge_info.get("used") else None}
+    result["grounded_state"] = payload["state"] if knowledge_info.get("used") else None
+    return result, knowledge_info
+
+
+async def decide(request: Request, body: DecideRequest):
+    state = request.app.state
+    raw_questions = body.model_dump()["questions"]
+    result, knowledge_info = await _ground_and_decide(
+        state, body.state, raw_questions, body.knowledge, body.orders
+    )
+    out = {**result, "knowledge": knowledge_info}
+    if body.policy:
+        out["policy"] = apply_policy(result.get("answers", {}), body.policy)
+    return out
 
 
 @router.post("/decide/raw")
@@ -185,6 +207,73 @@ async def decide_raw(request: Request, payload: dict):
         return await request.app.state.engine.decide(payload)
     except EngineError as exc:
         raise HTTPException(503, str(exc)) from exc
+
+
+# ---------------------------------------------------------------- recipes
+
+@router.get("/recipes")
+async def recipes(role: str = ""):
+    items = [recipe_payload(r) for r in list_recipes()]
+    if role:
+        items = [i for i in items if i["role"] == role]
+    return items
+
+
+@router.get("/recipes/{key}")
+async def recipe_detail(key: str):
+    r = get_recipe(key)
+    if r is None:
+        raise HTTPException(404, f"unknown recipe '{key}'")
+    return recipe_payload(r)
+
+
+@router.post("/recipes/{key}/run")
+async def recipe_run(request: Request, key: str, body: dict | None = None):
+    """Run a recipe: optional {state, knowledge, policy} overrides."""
+    r = get_recipe(key)
+    if r is None:
+        raise HTTPException(404, f"unknown recipe '{key}'")
+    body = body or {}
+    state_text = body.get("state") or r.sample_state
+    from .schemas import KnowledgeOptions
+
+    knowledge_opts = None
+    if body.get("knowledge") is not None:
+        knowledge_opts = KnowledgeOptions(**body["knowledge"])
+    raw_questions = body.get("questions") or r.questions
+    result, knowledge_info = await _ground_and_decide(
+        request.app.state, state_text, raw_questions, knowledge_opts, body.get("orders")
+    )
+    policy_spec = body.get("policy") if body.get("policy") is not None else r.policy
+    out = {**result, "knowledge": knowledge_info, "recipe": r.key}
+    if policy_spec:
+        out["policy"] = apply_policy(result.get("answers", {}), policy_spec)
+    return out
+
+
+# ---------------------------------------------------------------- eval
+
+@router.post("/eval")
+async def eval_endpoint(request: Request, body: EvalRequest):
+    """Score a labeled set against the engine. Slow: one pass per example."""
+    state = request.app.state
+    raw_questions = {k: dict(v) for k, v in body.questions.items()}
+    results: list[dict] = []
+    labels: list[dict] = []
+    errors: list[str] = []
+    for i, example in enumerate(body.examples):
+        try:
+            result, _ = await _ground_and_decide(
+                state, example.state, raw_questions, example.knowledge, body.orders
+            )
+            results.append(result)
+        except HTTPException as exc:
+            errors.append(f"example {i}: {exc.detail}"[:200])
+            results.append({"answers": {}})
+        labels.append(example.labels)
+    report = evaluate(raw_questions, results, labels, body.threshold)
+    report["errors"] = errors
+    return report
 
 
 # ---------------------------------------------------------------- knowledge
