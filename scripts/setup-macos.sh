@@ -6,15 +6,23 @@ set -euo pipefail
 PY=${PYTHON:-python3}
 
 echo "==> Creating virtualenv (.venv)"
-$PY -m venv .venv
+if command -v uv >/dev/null 2>&1; then
+    # torch ships no wheels for the newest CPython on day one; uv pins a
+    # compatible interpreter (3.14) even when system python3 is newer.
+    uv venv --python 3.14 .venv
+    VIRTUAL_ENV="$PWD/.venv"
+else
+    $PY -m venv .venv
+    VIRTUAL_ENV="$PWD/.venv"
+fi
 source .venv/bin/activate
 
 echo "==> Installing basal engine (MLX + media extras)"
 BASAL_VERSION=${BASAL_VERSION:-v2.3.5}
-uv pip install "basal[mlx,media,mcp] @ https://github.com/rkinas/basal/archive/refs/tags/${BASAL_VERSION}.tar.gz"
+uv pip install --python "$VIRTUAL_ENV/bin/python" "basal[mlx,media,mcp] @ https://github.com/rkinas/basal/archive/refs/tags/${BASAL_VERSION}.tar.gz"
 
 echo "==> Installing basal-station"
-uv pip install -e .
+uv pip install --python "$VIRTUAL_ENV/bin/python" -e .
 
 echo
 echo "Done. Next steps:"

@@ -6,15 +6,21 @@ set -euo pipefail
 PY=${PYTHON:-python3}
 
 echo "==> Creating virtualenv (.venv)"
-$PY -m venv .venv
+if command -v uv >/dev/null 2>&1; then
+    uv venv --python 3.12 .venv
+    VIRTUAL_ENV="$PWD/.venv"
+else
+    $PY -m venv .venv
+    VIRTUAL_ENV="$PWD/.venv"
+fi
 source .venv/bin/activate
 
 echo "==> Installing basal engine (GGUF/CPU route; add [fp8] only for >=16 GB Hopper/Blackwell)"
 BASAL_VERSION=${BASAL_VERSION:-v2.3.5}
-uv pip install "basal[mcp] @ https://github.com/rkinas/basal/archive/refs/tags/${BASAL_VERSION}.tar.gz"
+uv pip install --python "$VIRTUAL_ENV/bin/python" "basal[mcp] @ https://github.com/rkinas/basal/archive/refs/tags/${BASAL_VERSION}.tar.gz"
 
 echo "==> Installing basal-station"
-uv pip install -e .
+uv pip install --python "$VIRTUAL_ENV/bin/python" -e .
 
 echo "==> Checking for llama.cpp (used by basal --mode gguf)"
 if command -v llama-server >/dev/null 2>&1 || command -v llama-cli >/dev/null 2>&1; then
