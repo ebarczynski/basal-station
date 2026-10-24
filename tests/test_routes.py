@@ -23,7 +23,9 @@ def test_decide_route_signature_not_mangled():
     params = inspect.signature(endpoint).parameters
     assert "body" in params
     annotation = params["body"].annotation
-    assert annotation is DecideRequest or DecideRequest in getattr(annotation, "__args__", ())
+    # routes.py uses `from __future__ import annotations`, so the annotation
+    # may be the class itself or its name as a string
+    assert annotation in (DecideRequest, "DecideRequest")
     # the shared helper's args must never leak into the endpoint
     for leaked in ("state_text", "raw_questions", "app_state"):
         assert leaked not in params
