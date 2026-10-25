@@ -40,10 +40,21 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.include_router(router)
 
     if UI_DIR.is_dir():
-        app.mount("/ui", StaticFiles(directory=UI_DIR, html=True), name="ui")
+        # The console is a local tool with no asset versioning: serve
+        # everything no-cache so a restarted station is never masked by a
+        # stale cached app.js (that class of bug looks like "the app is
+        # broken" from the outside).
+        class NoCacheStaticFiles(StaticFiles):
+            def file_response(self, *args, **kwargs):
+                response = super().file_response(*args, **kwargs)
+                response.headers["Cache-Control"] = "no-cache"
+                return response
+
+        app.mount("/ui", NoCacheStaticFiles(directory=UI_DIR, html=True), name="ui")
 
         @app.get("/", include_in_schema=False)
         async def index():
-            return FileResponse(UI_DIR / "index.html")
+            return FileResponse(UI_DIR / "index.html",
+                                headers={"Cache-Control": "no-cache"})
 
     return app
