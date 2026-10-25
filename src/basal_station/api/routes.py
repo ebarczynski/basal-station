@@ -17,7 +17,13 @@ from ..backends.registry import (
 from ..catalog import format_size_bytes, get_model, list_models
 from ..eval import evaluate
 from ..hardware import detect
-from ..knowledge import KnowledgeBaseUnavailable, auto_query, ground_state, hits_summary
+from ..knowledge import (
+    KnowledgeBaseUnavailable,
+    auto_query,
+    ground_state,
+    hits_summary,
+    state_query,
+)
 from ..policy import apply_policy
 from ..recipes import get_recipe, list_recipes, recipe_payload
 from . import downloads
@@ -164,16 +170,27 @@ async def _ground_and_decide(
             query = knowledge_opts.query or auto_query(state_text, raw_questions)
             try:
                 hits = await app_state.knowledge.context(query, knowledge_opts.top_k)
+                grounded, included = ground_state(state_text, hits, query)
+                # Zero hits on the derived query: retry once with the state
+                # itself before deciding ungrounded — cheap, and it rescues
+                # the common "instructions were generic" case.
+                if not included and not knowledge_opts.query:
+                    retry = state_query(state_text)
+                    if retry and retry != query:
+                        hits = await app_state.knowledge.context(
+                            retry, knowledge_opts.top_k
+                        )
+                        grounded, included = ground_state(state_text, hits, retry)
+                        query = f"{query} (retried with state text)"
             except Exception as exc:
                 knowledge_info = {"used": False, "error": str(exc)[:300]}
             else:
-                grounded, included = ground_state(state_text, hits, query)
                 payload["state"] = grounded
                 knowledge_info = {
                     "used": True,
                     "query": query,
                     "hits": hits_summary(hits),
-                    "included": len(included),
+                    "included": included,
                     "latency_ms": round(1000 * (time.monotonic() - t0)),
                 }
 

@@ -9,20 +9,30 @@ MAX_BLOCK_CHARS = 6000
 
 
 def auto_query(state: str, questions: dict[str, Any]) -> str:
-    """Build a retrieval query from the questions and the head of the state."""
+    """Natural-language retrieval query: question instructions + the state head.
+
+    Measured against multi-query retrieval: pipe-joined question names and
+    option keys ("route | technical | account | Ticket …") return zero hits
+    where an instruction sentence returns several. Instructions are natural
+    language by design; bare keys add noise, so they are dropped. The state
+    head anchors the query to the concrete case.
+    """
     parts: list[str] = []
-    for name, spec in list(questions.items())[:4]:
-        parts.append(name.replace("_", " "))
-        instructions = spec.get("instructions") if isinstance(spec, dict) else None
-        if instructions:
-            parts.append(str(instructions)[:200])
-        criteria = spec.get("criteria") if isinstance(spec, dict) else None
-        if isinstance(criteria, dict):
-            parts.extend(str(k) for k in list(criteria)[:6])
+    for spec in list(questions.values())[:4]:
+        if not isinstance(spec, dict):
+            continue
+        instructions = str(spec.get("instructions") or "").strip()
+        if len(instructions) > 8:
+            parts.append(instructions.rstrip("?.") + "?")
     state_head = " ".join((state or "").split())[:400]
     if state_head:
         parts.append(state_head)
-    return " | ".join(parts)[:800]
+    return " ".join(parts)[:800]
+
+
+def state_query(state: str) -> str:
+    """The state itself as a retrieval query (zero-hit retry path)."""
+    return " ".join((state or "").split())[:400]
 
 
 def _normalize_hits(payload: Any) -> list[dict[str, Any]]:

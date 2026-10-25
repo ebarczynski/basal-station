@@ -6,16 +6,29 @@ from basal_station.knowledge.enrich import (
 )
 
 
-def test_auto_query_uses_names_and_state():
+def test_auto_query_is_natural_language():
     q = auto_query(
         "KYC escalation for a business account with PEP match",
-        {"routing": {"type": "choice", "instructions": "route the escalation",
+        {"routing": {"type": "choice", "instructions": "Route the escalation to the right team",
                      "criteria": {"edd": "enhanced due diligence"}}},
     )
-    assert "routing" in q
-    assert "route the escalation" in q
-    assert "edd" in q
-    assert "PEP" in q
+    # instructions become a sentence, the state anchors the case…
+    assert "Route the escalation to the right team?" in q
+    assert "KYC escalation" in q
+    # …while bare option keys and question names are dropped as noise
+    assert " edd " not in q and "routing" not in q
+    assert "|" not in q
+
+
+def test_auto_query_skips_short_or_missing_instructions():
+    q = auto_query("State text here.", {"q": {"type": "noul", "instructions": "ok?"}})
+    assert q == "State text here."
+    assert auto_query("", {}) == ""
+
+
+def test_state_query_is_flattened():
+    assert state_query("Line one.\n\n  Line   two ") == "Line one. Line two"
+    assert state_query("") == ""
 
 
 def test_format_hits_block_numbered_with_sources():
