@@ -491,7 +491,6 @@ async function runDecision() {
     },
   };
   if (state.recipePolicy) body.policy = state.recipePolicy;
-  if ($("#chkOrders").checked) body.orders = 2;
 
   const btn = $("#btnRun");
   btn.disabled = true;
