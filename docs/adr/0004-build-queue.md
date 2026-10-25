@@ -1,8 +1,11 @@
-# Post-grill build queue — items 1–7 DONE, item 8 GATED
+# Post-grill build queue — items 1–8 DONE
 
-Status: **1–7 implemented and pushed to `grill`** (2026-10-24, tests green
-at each commit). Item 8 touches the separate knowledge-palace repo and
-stays gated on its own branch + confirmation.
+Status: **all items done** (2026-10-25). Item 8 landed in knowledge-palace
+as `feat/context-structured-json`, merged to `master` and pushed: the
+`context` tool now always returns schema-stable JSON
+(`{query, total, results: [{text, title, source, score, author?, tags?,
+provenance?}]}`); empty results are an empty list, never prose. Verified
+live from the station: grounding now yields per-hit passages with titles.
 
 Settled decisions live in ADR-0001 (grounding), ADR-0002 (GGUF contract),
 ADR-0003 (adoption). Work happened on the `grill` branch only; `main` is
@@ -26,8 +29,8 @@ Priority order:
 7. Small batch: enrich 6000-char budget clamp; `mcp>=2.0` floor; eval noul
    fallback key fix; exact GGUF quant filename match; README launchd example
    gains `--host 127.0.0.1`.
-8. knowledge-palace repo (separate repo, own branch, own confirmation):
-   structured `context` tool.
+8. DONE — knowledge-palace `context` tool returns structured JSON
+   (github.com/ebarczynski/knowledge-palace @ master, commit 1e55a7e).
 
 Deferred (tripwire): `fast`/CUDA-graph backend mode and `--mode mlx` +
 `-MLX-8bit` pairing — revisit when the engine's model loader is confirmed
