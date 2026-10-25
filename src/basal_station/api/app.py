@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..backends import EngineManager
@@ -43,7 +43,12 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         # The console is a local tool with no asset versioning: serve
         # everything no-cache so a restarted station is never masked by a
         # stale cached app.js (that class of bug looks like "the app is
-        # broken" from the outside).
+        # broken" from the outside). Asset URLs additionally carry a build id
+        # (mtime of the newest UI file), because browsers may keep entries
+        # cached from before the no-cache header existed and skip
+        # revalidation entirely.
+        build_id = str(int(max(p.stat().st_mtime for p in UI_DIR.iterdir())))
+
         class NoCacheStaticFiles(StaticFiles):
             def file_response(self, *args, **kwargs):
                 response = super().file_response(*args, **kwargs)
@@ -54,7 +59,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
 
         @app.get("/", include_in_schema=False)
         async def index():
-            return FileResponse(UI_DIR / "index.html",
+            html = (UI_DIR / "index.html").read_text()
+            return HTMLResponse(html.replace("__BUILD_ID__", build_id),
                                 headers={"Cache-Control": "no-cache"})
 
     return app
