@@ -3,6 +3,7 @@ from basal_station.knowledge.enrich import (
     format_hits_block,
     ground_state,
     hits_summary,
+    state_query,
 )
 
 
