@@ -54,6 +54,7 @@
           </select>
           <button id="btnLoadRecipe" class="ghost small">load</button>
           <button id="btnExample" class="ghost small">example</button>
+          <button id="btnReset" class="ghost small" title="Clear state, questions, results and recipe selection">reset</button>
         </div>
       </div>
       <div id="recipeHint" class="small muted hidden"></div>
@@ -76,7 +77,13 @@
     </section>
 
     <section class="card">
-      <h2>Result</h2>
+      <div class="row spread">
+        <h2>Result</h2>
+        <button id="btnClearResult" class="ghost small" title="Clear the result panel">clear</button>
+      </div>
+      <div id="staleBanner" class="stale-banner hidden">
+        inputs changed since this run — press <b>Run decision</b> to refresh
+      </div>
       <div id="results"><div class="muted">No decision yet.</div></div>
       <div id="usageLine" class="small muted"></div>
     </section>

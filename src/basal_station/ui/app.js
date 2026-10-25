@@ -14,6 +14,7 @@ const state = {
   qSeq: 0,
   defaultModel: "omni-1.0-max",
   recipePolicy: null,
+  lastRunSnapshot: null,
 };
 
 /* ---------------- helpers ---------------- */
@@ -405,6 +406,11 @@ function collectQuestions() {
 function renderResult(answers, usage) {
   const box = $("#results");
   box.innerHTML = "";
+  box.dataset.hasResult = "1";
+  if (!answers || !Object.keys(answers).length) {
+    box.innerHTML = `<div class="muted">the engine returned no answers.</div>`;
+    return;
+  }
   for (const [name, a] of Object.entries(answers || {})) {
     const q = document.createElement("div");
     q.className = "result-q";
@@ -470,6 +476,61 @@ function renderPolicy(policy) {
   $("#results").appendChild(box);
 }
 
+/* ---------------- result lifecycle (stale detection, clear, reset) -------- */
+
+function snapshotInputs() {
+  return JSON.stringify({
+    state: $("#stateInput").value.trim(),
+    questions: collectQuestions(),
+  });
+}
+
+function showStaleBanner(on) {
+  $("#staleBanner").classList.toggle("hidden", !on);
+  $("#results").classList.toggle("stale", on);
+}
+
+function markResultsStaleIfDirty() {
+  if (state.lastRunSnapshot === null) return; // nothing run yet
+  if (!$("#results").dataset.hasResult) return; // no result on screen
+  showStaleBanner(snapshotInputs() !== state.lastRunSnapshot);
+}
+
+function clearResults(message) {
+  $("#results").innerHTML =
+    `<div class="muted">${escapeHtml(message || "No decision yet.")}</div>`;
+  delete $("#results").dataset.hasResult;
+  $("#usageLine").textContent = "";
+  const pb = $("#policyBox");
+  if (pb) pb.remove();
+  showStaleBanner(false);
+  state.lastRunSnapshot = null;
+}
+
+function renderError(message) {
+  const box = document.createElement("div");
+  box.className = "error-card";
+  box.innerHTML =
+    `<b>run failed</b> — ${escapeHtml(message)}` +
+    `<div class="small muted">the result below is from the previous run and may be outdated</div>`;
+  $("#results").prepend(box);
+}
+
+function resetConsole() {
+  $("#stateInput").value = "";
+  $("#questionList").innerHTML = "";
+  state.qSeq = 0;
+  addQuestion();
+  $("#recipeSelect").value = "";
+  $("#recipeHint").classList.add("hidden");
+  state.recipePolicy = null;
+  $("#kbQuery").value = "";
+  $("#topk").value = 5;
+  $("#chkGround").checked = true;
+  clearResults();
+  $("#stateInput").focus();
+}
+
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -478,8 +539,15 @@ function escapeHtml(s) {
 async function runDecision() {
   const stateText = $("#stateInput").value.trim();
   const questions = collectQuestions();
-  if (!stateText) return toast("state is empty", true);
-  if (!Object.keys(questions).length) return toast("add at least one question", true);
+  if (!stateText) {
+    clearResults("state is empty — paste or load something to judge.");
+    return;
+  }
+  if (!Object.keys(questions).length) {
+    // persistent, not a fleeting toast: every question card needs a name
+    clearResults("no runnable questions — every question needs a name.");
+    return;
+  }
 
   const body = {
     state: stateText,
@@ -495,10 +563,18 @@ async function runDecision() {
   const btn = $("#btnRun");
   btn.disabled = true;
   btn.textContent = "deciding…";
+  // automatic clear: the previous result never survives into a new run
+  $("#results").innerHTML = `<div class="muted">deciding…</div>`;
+  delete $("#results").dataset.hasResult;
+  const pb = $("#policyBox");
+  if (pb) pb.remove();
+  showStaleBanner(false);
   try {
     const result = await api("/api/decide", { method: "POST", body });
     renderResult(result.answers, result.usage);
     renderPolicy(result.policy);
+    state.lastRunSnapshot = snapshotInputs();
+    showStaleBanner(false);
     if (result.knowledge?.used) {
       const k = result.knowledge;
       $("#usageLine").textContent =
@@ -509,6 +585,8 @@ async function runDecision() {
       toast(`knowledge: ${result.knowledge.error}`, true);
     }
   } catch (e) {
+    renderError(e.message);
+    state.lastRunSnapshot = snapshotInputs();
     toast(`decide: ${e.message}`, true);
   } finally {
     btn.disabled = false;
@@ -640,12 +718,21 @@ function wire() {
   $("#btnAddQ").onclick = () => addQuestion();
   $("#btnExample").onclick = loadExample;
   $("#btnLoadRecipe").onclick = loadRecipe;
+  $("#btnReset").onclick = resetConsole;
+  $("#btnClearResult").onclick = () => clearResults();
   $("#btnSearch").onclick = kbSearch;
   $("#btnAsk").onclick = kbAsk;
   $("#kbSearchInput").addEventListener("keydown", (e) => e.key === "Enter" && kbSearch());
   $("#kbAskInput").addEventListener("keydown", (e) => e.key === "Enter" && kbAsk());
   $("#logDetails").addEventListener("toggle", loadLogs);
   $("#quantSelect").addEventListener("change", loadBackends);
+  $("#stateInput").addEventListener("input", markResultsStaleIfDirty);
+  // any edit inside a question card marks results stale
+  $("#questionList").addEventListener("input", markResultsStaleIfDirty);
+  // card add/remove/rebuild too (recipe loads rebuild; snapshot reset guards them)
+  new MutationObserver(markResultsStaleIfDirty).observe($("#questionList"), {
+    childList: true, subtree: true,
+  });
   addQuestion();
 }
 

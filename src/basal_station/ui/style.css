@@ -202,6 +202,27 @@ button.danger { color: var(--bad); }
 .muted { color: var(--muted); }
 .hidden { display: none; }
 
+.stale-banner {
+  background: rgba(245, 166, 35, 0.1);
+  border: 1px solid rgba(245, 166, 35, 0.35);
+  color: var(--warn);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  margin-bottom: 10px;
+}
+#results.stale { opacity: 0.45; transition: opacity 0.2s; }
+
+.error-card {
+  background: rgba(255, 93, 115, 0.08);
+  border: 1px solid rgba(255, 93, 115, 0.35);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  color: var(--text);
+  font-size: 13px;
+}
+
 .logs { margin: 0 22px 22px; }
 .logs summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 #logBox {
